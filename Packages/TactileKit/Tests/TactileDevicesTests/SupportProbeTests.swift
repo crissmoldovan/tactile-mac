@@ -23,7 +23,7 @@ final class SupportProbeTests: XCTestCase {
 
     // MARK: - Listing
 
-    func testListingOpensNothing() throws {
+    func testListingOpensNothing() async throws {
         let (system, probe) = make(try SupportDesk.all())
         var changes = 0
         probe.onDevicesChanged = { changes += 1 }
@@ -71,33 +71,34 @@ final class SupportProbeTests: XCTestCase {
         return (take, system.calls)
     }
 
-    private func probeCalls(_ connected: [HIDInterfaceDescription], usbID: String, configure: (FakeHIDSystem) -> Void) throws
+    private func probeCalls(_ connected: [HIDInterfaceDescription], usbID: String, configure: (FakeHIDSystem) -> Void) async throws
         -> (take: [FakeHIDSystem.Call], release: [FakeHIDSystem.Call]) {
         let (system, probe) = make(connected)
         configure(system)
         probe.start()
         system.clearCalls()
-        XCTAssertNotNil(probe.take(try device(probe, usbID), onReport: { _ in }, onGone: {}))
+        let taken = await probe.take(try device(probe, usbID), onReport: { _ in }, onGone: { _ in })
+        XCTAssertNotNil(taken)
         let take = system.calls
         system.clearCalls()
         probe.release()
         return (take, system.calls)
     }
 
-    func testTheStripIsTakenAndReleasedAsTheSourceDoes() throws {
+    func testTheStripIsTakenAndReleasedAsTheSourceDoes() async throws {
         let desk = try SupportDesk.strip()
         let source = sourceCalls(desk, vendorID: Panels.wchVendorID) { _ in }
-        let probe = try probeCalls(desk, usbID: "27c0:0859") { _ in }
+        let probe = try await probeCalls(desk, usbID: "27c0:0859") { _ in }
         XCTAssertEqual(probe.take, source.take)
         XCTAssertEqual(probe.release, source.release)
         XCTAssertTrue(probe.take.contains(.writeInputMode(SupportDesk.stripTouchID, 2)))
         XCTAssertTrue(probe.release.contains(.writeInputMode(SupportDesk.stripTouchID, 0)))
     }
 
-    func testTheILITEKIsTakenAndReleasedAsTheSourceDoes() throws {
+    func testTheILITEKIsTakenAndReleasedAsTheSourceDoes() async throws {
         let desk = try SupportDesk.ilitek()
         let source = sourceCalls(desk, vendorID: Panels.ilitekVendorID) { _ in }
-        let probe = try probeCalls(desk, usbID: "222a:0001") { _ in }
+        let probe = try await probeCalls(desk, usbID: "222a:0001") { _ in }
         XCTAssertEqual(probe.take, source.take)
         XCTAssertEqual(probe.release, source.release)
         XCTAssertTrue(probe.take.contains(.readFeatureReport(SupportDesk.ilitekTouchID, reportID: 0x06, length: 258)))
@@ -105,7 +106,7 @@ final class SupportProbeTests: XCTestCase {
                        "the ILITEK has no Input Mode")
     }
 
-    func testOpeningSharedAFailedReadAndARefusedWriteGoAsTheSourcesDo() throws {
+    func testOpeningSharedAFailedReadAndARefusedWriteGoAsTheSourcesDo() async throws {
         let desk = try SupportDesk.strip()
         let configure: (FakeHIDSystem) -> Void = { system in
             system.openResults[SupportDesk.stripTouchID] = (FakeHIDSystem.refused, kIOReturnSuccess)
@@ -114,17 +115,17 @@ final class SupportProbeTests: XCTestCase {
             system.writeResult = FakeHIDSystem.notPermitted
         }
         let source = sourceCalls(desk, vendorID: Panels.wchVendorID, configure: configure)
-        let probe = try probeCalls(desk, usbID: "27c0:0859", configure: configure)
+        let probe = try await probeCalls(desk, usbID: "27c0:0859", configure: configure)
         XCTAssertEqual(probe.take, source.take)
         XCTAssertEqual(probe.release, source.release)
     }
 
-    func testAReadThatTimesOutEndsTheReadsAsTheSourcesDo() throws {
+    func testAReadThatTimesOutEndsTheReadsAsTheSourcesDo() async throws {
         var touch = try SupportDesk.strip()[0]
         touch.descriptor = Panels.twoFeatureReportsTouchscreen
         let configure: (FakeHIDSystem) -> Void = { $0.readSeconds = 5 }
         let source = sourceCalls([touch], vendorID: Panels.wchVendorID, configure: configure)
-        let probe = try probeCalls([touch], usbID: "27c0:0859", configure: configure)
+        let probe = try await probeCalls([touch], usbID: "27c0:0859", configure: configure)
         XCTAssertEqual(probe.take, source.take)
         XCTAssertEqual(probe.take.filter { if case .readFeatureReport = $0 { return true } else { return false } },
                        [.readFeatureReport(SupportDesk.stripTouchID, reportID: 0x03, length: 2)])
@@ -132,11 +133,12 @@ final class SupportProbeTests: XCTestCase {
 
     // MARK: - What it records
 
-    func testTheSwitchesAreRecordedWithTheBytesThatCameBack() throws {
+    func testTheSwitchesAreRecordedWithTheBytesThatCameBack() async throws {
         let (system, probe) = make(try SupportDesk.all())
         system.featureReportBytes[0x0A] = [0x0A, 0x0A]
         probe.start()
-        let switches = try XCTUnwrap(probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: {}))
+        let taken = await probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: { _ in })
+        let switches = try XCTUnwrap(taken)
         XCTAssertEqual(switches.opens, [
             SupportSwitches.Open(interface: SupportDesk.stripTouchID, role: .touch, exclusiveResult: 0, sharedResult: nil),
             SupportSwitches.Open(interface: SupportDesk.stripMouseID, role: .mouse, exclusiveResult: 0, sharedResult: nil),
@@ -154,12 +156,13 @@ final class SupportProbeTests: XCTestCase {
         XCTAssertNil(probe.release(), "nothing more to let go of")
     }
 
-    func testAFailedReadIsRecordedAndTheTakeGoesOn() throws {
+    func testAFailedReadIsRecordedAndTheTakeGoesOn() async throws {
         let (system, probe) = make(try SupportDesk.all())
         system.readResults[0x0A] = FakeHIDSystem.notPermitted
         system.openResults[SupportDesk.stripMouseID] = (FakeHIDSystem.refused, kIOReturnSuccess)
         probe.start()
-        let switches = try XCTUnwrap(probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: {}))
+        let taken = await probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: { _ in })
+        let switches = try XCTUnwrap(taken)
         XCTAssertEqual(switches.reads.map(\.result), [FakeHIDSystem.notPermitted])
         XCTAssertEqual(switches.reads.map(\.lengthReturned), [0])
         XCTAssertEqual(switches.reads.map(\.bytes), [[]])
@@ -169,11 +172,12 @@ final class SupportProbeTests: XCTestCase {
         XCTAssertEqual(SupportSwitches.ioReturnText(FakeHIDSystem.notPermitted), "0xe00002e2")
     }
 
-    func testAnInterfaceThatCantBeOpenedIsNeitherReadNorSwitched() throws {
+    func testAnInterfaceThatCantBeOpenedIsNeitherReadNorSwitched() async throws {
         let (system, probe) = make(try SupportDesk.all())
         system.openResults[SupportDesk.stripTouchID] = (FakeHIDSystem.refused, FakeHIDSystem.notPermitted)
         probe.start()
-        let switches = try XCTUnwrap(probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: {}))
+        let taken = await probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: { _ in })
+        let switches = try XCTUnwrap(taken)
         XCTAssertEqual(switches.opens[0].held, .notOpened)
         XCTAssertEqual(switches.reads, [])
         XCTAssertNil(switches.hasInputMode, "not asked: it isn't open")
@@ -181,10 +185,10 @@ final class SupportProbeTests: XCTestCase {
         XCTAssertNil(probe.release())
     }
 
-    func testAVendorInterfaceIsNeverOpened() throws {
+    func testAVendorInterfaceIsNeverOpened() async throws {
         let (system, probe) = make(try SupportDesk.all())
         probe.start()
-        _ = probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: {})
+        _ = await probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: { _ in })
         probe.release()
         probe.stop()
         XCTAssertFalse(system.calls.contains { call in
@@ -200,11 +204,12 @@ final class SupportProbeTests: XCTestCase {
 
     // MARK: - Mouse-only
 
-    func testAMouseOnlyDeviceIsOpenedAndListenedToAndNothingElse() throws {
+    func testAMouseOnlyDeviceIsOpenedAndListenedToAndNothingElse() async throws {
         let (system, probe) = make(try SupportDesk.all())
         probe.start()
         system.clearCalls()
-        let switches = try XCTUnwrap(probe.take(try device(probe, "1234:5678"), onReport: { _ in }, onGone: {}))
+        let taken = await probe.take(try device(probe, "1234:5678"), onReport: { _ in }, onGone: { _ in })
+        let switches = try XCTUnwrap(taken)
         XCTAssertEqual(system.calls, [
             .open(SupportDesk.pointerID, exclusive: true),
             .startReports(SupportDesk.pointerID, bufferSize: 80),
@@ -219,12 +224,12 @@ final class SupportProbeTests: XCTestCase {
 
     // MARK: - Reports and unplugging
 
-    func testReportsArriveWithTheirInterfaceUntilTheDeviceIsLetGo() throws {
+    func testReportsArriveWithTheirInterfaceUntilTheDeviceIsLetGo() async throws {
         let (system, probe) = make(try SupportDesk.all())
         system.keepsDeliveringAfterStop = true
         probe.start()
         var reports: [SupportRawReport] = []
-        _ = probe.take(try device(probe, "27c0:0859"), onReport: { reports.append($0) }, onGone: {})
+        _ = await probe.take(try device(probe, "27c0:0859"), onReport: { reports.append($0) }, onGone: { _ in })
         system.send(Panels.wchMouse(buttons: 1, x: 0.5, y: 0.5), on: SupportDesk.stripMouseID, at: 10)
         system.send(Panels.wchTouch(id: 1, x: 0.5, y: 0.5), on: SupportDesk.stripTouchID, at: 11)
         probe.release()
@@ -235,11 +240,11 @@ final class SupportProbeTests: XCTestCase {
         XCTAssertEqual(reports.first?.bytes, Panels.wchMouse(buttons: 1, x: 0.5, y: 0.5))
     }
 
-    func testUnpluggingWritesNothingAndSaysSo() throws {
+    func testUnpluggingWritesNothingAndSaysSo() async throws {
         let (system, probe) = make(try SupportDesk.all())
         probe.start()
         var gone = 0
-        _ = probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: { gone += 1 })
+        _ = await probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: { _ in gone += 1 })
         system.clearCalls()
         system.disconnect(SupportDesk.stripTouchID)
         XCTAssertEqual(gone, 1)
@@ -250,22 +255,93 @@ final class SupportProbeTests: XCTestCase {
         XCTAssertFalse(probe.devices.contains { $0.usbID == "27c0:0859" && $0.touchInterface != nil })
     }
 
-    func testADeviceThatHasGoneCantBeTaken() throws {
+    func testADeviceThatHasGoneCantBeTaken() async throws {
         let (system, probe) = make(try SupportDesk.all())
         probe.start()
         let pointer = try device(probe, "1234:5678")
         system.disconnect(SupportDesk.pointerID)
-        XCTAssertNil(probe.take(pointer, onReport: { _ in }, onGone: {}))
+        let taken = await probe.take(pointer, onReport: { _ in }, onGone: { _ in })
+        XCTAssertNil(taken)
     }
 
-    func testStoppingLetsTheDeviceGo() throws {
+    func testStoppingLetsTheDeviceGo() async throws {
         let (system, probe) = make(try SupportDesk.all())
         probe.start()
-        _ = probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: {})
+        _ = await probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: { _ in })
         system.clearCalls()
         probe.stop()
         XCTAssertEqual(system.calls.first, .stopReports(SupportDesk.stripTouchID))
         XCTAssertTrue(system.calls.contains(.writeInputMode(SupportDesk.stripTouchID, 0)))
         XCTAssertEqual(system.calls.last, .stopMatching)
+    }
+
+    // MARK: - One interface going (M-2), and reads off the main thread (M-7)
+
+    /// The mouse interface goes while the touch interface stays: the take ends as a release does,
+    /// 0 written back to the touch interface, best effort.
+    func testWhenOneInterfaceGoesTheOtherIsSwitchedBack() async throws {
+        let (system, probe) = make(try SupportDesk.all())
+        probe.start()
+        var writeBacks: [SupportSwitches.ModeWrite?] = []
+        _ = await probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: { writeBacks.append($0) })
+        system.clearCalls()
+        system.disconnect(SupportDesk.stripMouseID)
+        XCTAssertEqual(writeBacks, [SupportSwitches.ModeWrite(value: 0, result: 0)])
+        XCTAssertTrue(system.calls.contains(.writeInputMode(SupportDesk.stripTouchID, 0)), "the touch interface is switched back")
+        XCTAssertTrue(system.calls.contains(.close(SupportDesk.stripTouchID, exclusive: true)))
+        XCTAssertNil(probe.release(), "already let go")
+    }
+
+    /// The reads run off the main thread: while one is under way, a release waits for it, then
+    /// closes everything, and nothing is written.
+    func testAReleaseDuringAReadWaitsForItAndWritesNothing() async throws {
+        let (system, probe) = make(try SupportDesk.all())
+        system.suspendsReads = true
+        probe.start()
+        let device = try device(probe, "27c0:0859")
+        let taking = Task { @MainActor in await probe.take(device, onReport: { _ in }, onGone: { _ in }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        XCTAssertNil(probe.release(), "deferred until the read returns")
+        XCTAssertFalse(system.calls.contains { if case .close = $0 { return true } else { return false } })
+        system.resumeReads()
+        let switches = await taking.value
+        XCTAssertNil(switches, "the take didn't finish")
+        XCTAssertFalse(system.calls.contains { if case .writeInputMode = $0 { return true } else { return false } })
+        XCTAssertTrue(system.calls.contains(.close(SupportDesk.stripTouchID, exclusive: true)))
+        XCTAssertTrue(system.calls.contains(.close(SupportDesk.stripMouseID, exclusive: true)))
+    }
+
+    /// Unplugged during a read: everything is closed at once, nothing written, and the take ends.
+    func testUnpluggedDuringAReadTheTakeEnds() async throws {
+        let (system, probe) = make(try SupportDesk.all())
+        system.suspendsReads = true
+        probe.start()
+        var gone = 0
+        let device = try device(probe, "27c0:0859")
+        let taking = Task { @MainActor in await probe.take(device, onReport: { _ in }, onGone: { _ in gone += 1 }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        system.disconnect(SupportDesk.stripTouchID)
+        XCTAssertEqual(gone, 1)
+        system.resumeReads()
+        let switches = await taking.value
+        XCTAssertNil(switches)
+        XCTAssertFalse(system.calls.contains { if case .writeInputMode = $0 { return true } else { return false } })
+    }
+
+    /// Every line of a take goes into the log book, keyed by the device's touch interface.
+    func testTheTakeIsWrittenInTheLogBook() async throws {
+        let system = FakeHIDSystem(connected: try SupportDesk.all())
+        system.inputModeInterfaces = [SupportDesk.stripTouchID]
+        let book = DeviceLogBook()
+        let probe = SupportProbe(system: system, logBook: book)
+        probe.start()
+        _ = await probe.take(try device(probe, "27c0:0859"), onReport: { _ in }, onGone: { _ in })
+        probe.release()
+        let lines = book.entries(about: [SupportDesk.stripTouchID]).map(\.text)
+        XCTAssertEqual(lines.first, "Support check: taking it (touchscreen) as Tactile takes a touchscreen")
+        XCTAssertTrue(lines.contains("Support check: read feature report 0x0A: 2 bytes asked, 2 returned in 0.000 s (IOReturn 0x00000000)"))
+        XCTAssertTrue(lines.contains("Support check: Input Mode 0 (mouse emulation) written back (IOReturn 0x00000000)"))
+        XCTAssertEqual(lines.last, "Support check: let go")
+        XCTAssertFalse(lines.joined().contains(SupportDesk.stripSerial))
     }
 }

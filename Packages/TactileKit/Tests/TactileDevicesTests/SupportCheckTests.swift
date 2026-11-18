@@ -39,7 +39,7 @@ final class SupportCheckTests: XCTestCase {
 
     // MARK: - Step 1: what it is
 
-    func testStepOneReadsWhatItIsAndTouchesNothing() throws {
+    func testStepOneReadsWhatItIsAndTouchesNothing() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "222a:0001")
         XCTAssertEqual(check.stage, .ready)
         let identity = check.identity
@@ -59,10 +59,10 @@ final class SupportCheckTests: XCTestCase {
 
     // MARK: - Steps 2, 3 and 4 on the panels
 
-    func testTheILITEKWorksFully() throws {
+    func testTheILITEKWorksFully() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "222a:0001")
         let panel = try Panels.ilitek()
-        check.start(at: 100)
+        await check.start(at: 100)
         XCTAssertEqual(check.stage, .touching(.one))
         XCTAssertEqual(check.switches?.reads.map(\.reportID), [0x06])
         XCTAssertEqual(check.switches?.hasInputMode, false)
@@ -93,12 +93,12 @@ final class SupportCheckTests: XCTestCase {
         XCTAssertNil(check.writeBack, "nothing to write back: it has no Input Mode")
     }
 
-    func testTheStripWorksWithOneFinger() throws {
+    func testTheStripWorksWithOneFinger() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "27c0:0859") {
             $0.featureReportBytes[0x0A] = [0x0A, 0x0A]
         }
         let panel = try Panels.wch()
-        check.start(at: 0)
+        await check.start(at: 0)
         XCTAssertEqual(check.switches?.inputModeWrite, SupportSwitches.ModeWrite(value: 2, result: kIOReturnSuccess))
         XCTAssertEqual(check.contactCountMaximum, 10)
 
@@ -122,10 +122,10 @@ final class SupportCheckTests: XCTestCase {
         XCTAssertEqual(check.steps[2].seconds, 2, accuracy: 1e-9)
     }
 
-    func testAStepsTalliesItsInterfaces() throws {
+    func testAStepsTalliesItsInterfaces() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "222a:0001")
         let take = try Panels.take(Panels.ilitek(), 2)
-        check.start(at: 0)
+        await check.start(at: 0)
         let last = play(take, on: ilitekIDs, system, from: 0)
         check.skip(at: last + 0.2)
         let step = try XCTUnwrap(check.steps.first)
@@ -145,9 +145,9 @@ final class SupportCheckTests: XCTestCase {
 
     // MARK: - When it doesn't work
 
-    func testNothingComesSoItDoesntWork() throws {
+    func testNothingComesSoItDoesntWork() async throws {
         let (_, check) = try make(try SupportDesk.all(), usbID: "222a:0001")
-        check.start(at: 0)
+        await check.start(at: 0)
         check.tick(at: 15)
         check.tick(at: 30)
         check.tick(at: 45)
@@ -157,9 +157,9 @@ final class SupportCheckTests: XCTestCase {
         XCTAssertEqual(check.verdictReason, .noReports)
     }
 
-    func testReportsTactileCantReadDontWork() throws {
+    func testReportsTactileCantReadDontWork() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "222a:0001")
-        check.start(at: 0)
+        await check.start(at: 0)
         system.send([0x77, 0x01, 0x02], on: SupportDesk.ilitekTouchID, at: 1)
         system.send([0x04], on: SupportDesk.ilitekTouchID, at: 2)
         check.skip(at: 3)
@@ -170,20 +170,20 @@ final class SupportCheckTests: XCTestCase {
         XCTAssertEqual(check.verdictReason, .reportsNotReadable)
     }
 
-    func testAFailedFeatureReadIsRecordedAndTheCheckGoesOn() throws {
+    func testAFailedFeatureReadIsRecordedAndTheCheckGoesOn() async throws {
         let (_, check) = try make(try SupportDesk.all(), usbID: "222a:0001") {
             $0.readResult = FakeHIDSystem.notPermitted
         }
-        check.start(at: 0)
+        await check.start(at: 0)
         XCTAssertEqual(check.switches?.reads.map(\.result), [FakeHIDSystem.notPermitted])
         XCTAssertEqual(check.stage, .touching(.one))
         XCTAssertNil(check.contactCountMaximum, "nothing came back")
     }
 
-    func testADeviceThatCantBeTakenEndsTheCheck() throws {
+    func testADeviceThatCantBeTakenEndsTheCheck() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "222a:0001")
         system.disconnect(SupportDesk.ilitekTouchID)
-        check.start(at: 0)
+        await check.start(at: 0)
         XCTAssertEqual(check.stage, .finished)
         XCTAssertEqual(check.interruption, .notConnected)
         XCTAssertNil(check.switches)
@@ -192,9 +192,9 @@ final class SupportCheckTests: XCTestCase {
 
     // MARK: - Skipping, the report cap, stopping and unplugging
 
-    func testSkippingEndsAStepAndKeepsWhatCame() throws {
+    func testSkippingEndsAStepAndKeepsWhatCame() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "27c0:0859")
-        check.start(at: 10)
+        await check.start(at: 10)
         system.send(Panels.wchMouse(buttons: 1, x: 0.25, y: 0.5), on: SupportDesk.stripMouseID, at: 11)
         check.skip(at: 13)
         XCTAssertEqual(check.stage, .touching(.two))
@@ -205,9 +205,9 @@ final class SupportCheckTests: XCTestCase {
         XCTAssertEqual(check.steps.last?.ending, nil, "the step under way")
     }
 
-    func testAtMostTwoHundredReportsAreKeptInAStep() throws {
+    func testAtMostTwoHundredReportsAreKeptInAStep() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "27c0:0859")
-        check.start(at: 0)
+        await check.start(at: 0)
         for n in 0..<250 {
             system.send(Panels.wchMouse(buttons: 1, x: Double(n) / 250, y: 0.5), on: SupportDesk.stripMouseID, at: 1 + Double(n) * 0.01)
         }
@@ -219,9 +219,9 @@ final class SupportCheckTests: XCTestCase {
         XCTAssertEqual(step.interfaces.first { $0.role == .mouse }?.reports, 250, "the tallies count every one")
     }
 
-    func testStoppingLetsTheDeviceGo() throws {
+    func testStoppingLetsTheDeviceGo() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "27c0:0859")
-        check.start(at: 0)
+        await check.start(at: 0)
         system.clearCalls()
         check.stop(at: 2)
         XCTAssertEqual(check.stage, .finished)
@@ -232,14 +232,14 @@ final class SupportCheckTests: XCTestCase {
         XCTAssertEqual(check.steps.count, 1, "stopping twice changes nothing")
     }
 
-    func testUnpluggingEndsTheCheckAndWritesNothing() throws {
+    func testUnpluggingEndsTheCheckAndWritesNothing() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "27c0:0859")
         var changes = 0
         check.onChange = { changes += 1 }
-        check.start(at: 0)
+        await check.start(at: 0)
         check.skip(at: 1)
         system.clearCalls()
-        system.disconnect(SupportDesk.stripMouseID)
+        system.disconnect(SupportDesk.stripTouchID)
         XCTAssertEqual(check.stage, .finished)
         XCTAssertEqual(check.interruption, .unplugged)
         XCTAssertEqual(check.steps.map(\.ending), [.skipped, .stopped])
@@ -249,11 +249,11 @@ final class SupportCheckTests: XCTestCase {
 
     // MARK: - Mouse-only
 
-    func testAMouseOnlyTouchscreenWorksWithOneFinger() throws {
+    func testAMouseOnlyTouchscreenWorksWithOneFinger() async throws {
         let (system, check) = try make(try SupportDesk.all(), usbID: "1234:5678")
         XCTAssertEqual(check.device.kind, .mouseOnly)
         XCTAssertEqual(check.identity.interfaces.map(\.role), [.pointer])
-        check.start(at: 0)
+        await check.start(at: 0)
         XCTAssertEqual(check.switches?.reads, [])
         XCTAssertNil(check.switches?.inputModeWrite)
         func send(_ buttons: UInt8, _ x: Double, at time: TimeInterval) {
@@ -299,5 +299,45 @@ final class SupportCheckTests: XCTestCase {
         XCTAssertTrue(verdict([step(), step()]) == (.doesNotWork, .noReports))
         XCTAssertTrue(verdict([]) == (.doesNotWork, .noReports))
         XCTAssertEqual(SupportVerdict.allCases.map(\.rawValue), ["full", "one-finger", "none"])
+    }
+
+    // MARK: - A device that can't be opened, and one interface going
+
+    /// None of its interfaces opens: the check ends at once, with no steps run and no verdict.
+    func testADeviceThatOpensNothingEndsAtOnce() async throws {
+        let (_, check) = try make(try SupportDesk.all(), usbID: "222a:0001") { system in
+            system.openResults[SupportDesk.ilitekTouchID] = (FakeHIDSystem.refused, FakeHIDSystem.notPermitted)
+            system.openResults[SupportDesk.ilitekMouseID] = (FakeHIDSystem.refused, FakeHIDSystem.notPermitted)
+        }
+        await check.start(at: 0)
+        XCTAssertEqual(check.stage, .finished)
+        XCTAssertEqual(check.interruption, .couldNotOpen)
+        XCTAssertTrue(check.wasInterrupted)
+        XCTAssertEqual(check.steps, [], "no fifteen-second steps")
+    }
+
+    func testOneInterfaceGoingInterruptsTheCheckAndSwitchesTheOtherBack() async throws {
+        let (system, check) = try make(try SupportDesk.all(), usbID: "27c0:0859")
+        await check.start(at: 0)
+        system.disconnect(SupportDesk.stripMouseID)
+        XCTAssertEqual(check.interruption, .unplugged)
+        XCTAssertEqual(check.writeBack, SupportSwitches.ModeWrite(value: 0, result: 0))
+    }
+
+    /// Stopped while its read is under way: the check ends at once, and the device is closed when the
+    /// read returns, with nothing written.
+    func testStoppedDuringTheTake() async throws {
+        let (system, check) = try make(try SupportDesk.all(), usbID: "27c0:0859") { $0.suspendsReads = true }
+        let starting = Task { @MainActor in await check.start(at: 0) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        XCTAssertEqual(check.stage, .taking)
+        check.stop(at: 1)
+        XCTAssertEqual(check.stage, .finished)
+        XCTAssertEqual(check.interruption, .stopped)
+        system.resumeReads()
+        await starting.value
+        XCTAssertEqual(check.stage, .finished)
+        XCTAssertFalse(system.calls.contains { if case .writeInputMode = $0 { return true } else { return false } })
+        XCTAssertTrue(system.calls.contains(.close(SupportDesk.stripTouchID, exclusive: true)))
     }
 }

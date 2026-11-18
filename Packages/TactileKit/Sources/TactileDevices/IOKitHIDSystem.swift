@@ -165,6 +165,22 @@ final class IOKitHIDSystem: HIDSystem {
     func readFeatureReport(_ id: HIDInterfaceID, reportID: Int, length: Int) -> FeatureReportRead {
         guard let device = devices[id] else { return FeatureReportRead(result: IOResult.noDevice, length: 0, seconds: 0) }
         guard length > 0 else { return FeatureReportRead(result: IOResult.badArgument, length: 0, seconds: 0) }
+        return Self.getReport(device, reportID: reportID, length: length)
+    }
+
+    /// The same call on a background thread, as hidapi makes it while the device is scheduled on
+    /// another thread's run loop. The device is kept alive by the box until the call returns; if the
+    /// interface is closed or unplugged meanwhile, IOKit answers with an error.
+    func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
+        guard let device = devices[id] else { return FeatureReportRead(result: IOResult.noDevice, length: 0, seconds: 0) }
+        guard length > 0 else { return FeatureReportRead(result: IOResult.badArgument, length: 0, seconds: 0) }
+        let box = DeviceBox(device: device)
+        return await Task.detached(priority: .userInitiated) {
+            Self.getReport(box.device, reportID: reportID, length: length)
+        }.value
+    }
+
+    nonisolated private static func getReport(_ device: IOHIDDevice, reportID: Int, length: Int) -> FeatureReportRead {
         var buffer = [UInt8](repeating: 0, count: length)
         var reportLength = CFIndex(length)
         let start = ProcessInfo.processInfo.systemUptime
@@ -252,6 +268,15 @@ final class IOKitHIDSystem: HIDSystem {
             maxInputReportSize: property(kIOHIDMaxInputReportSizeKey),
             manufacturer: property(kIOHIDManufacturerKey) ?? "",
             isBuiltIn: property(kIOHIDBuiltInKey) ?? false)
+    }
+}
+
+/// A device handed to a background read. IOHIDDevice is a CF object, safe to retain from any thread.
+private final class DeviceBox: @unchecked Sendable {
+    let device: IOHIDDevice
+
+    init(device: IOHIDDevice) {
+        self.device = device
     }
 }
 

@@ -58,6 +58,9 @@ public final class HIDTouchscreenSource: TouchscreenSource {
 
     private let system: HIDSystem
     private let log = Logger(subsystem: "com.crissmoldovan.tactile", category: "devices")
+    /// Where the touchscreen check's report reads what was done with each touchscreen: the same
+    /// lines as the log's, keyed by the touchscreen's touch interface, with no serial and no name.
+    private let logBook: DeviceLogBook
     private var isStarted = false
     /// Every touchscreen and mouse interface connected now.
     private var interfaces: [HIDInterfaceID: KnownInterface] = [:]
@@ -70,11 +73,18 @@ public final class HIDTouchscreenSource: TouchscreenSource {
     private var setAside: Set<HIDInterfaceID> = []
 
     public convenience init() {
-        self.init(system: IOKitHIDSystem())
+        self.init(system: IOKitHIDSystem(), logBook: .shared)
     }
 
-    init(system: HIDSystem) {
+    /// `logBook` nil: one of its own, as the tests have.
+    init(system: HIDSystem, logBook: DeviceLogBook? = nil) {
         self.system = system
+        self.logBook = logBook ?? DeviceLogBook()
+    }
+
+    /// Writes a line about `touchscreen` in the log book.
+    private func note(_ touchscreen: Touchscreen, _ text: String) {
+        logBook.note(touchscreen.touch.id, category: "devices", text)
     }
 
     /// A started source dropped without `stop()` still lets every touchscreen go: what IOKit holds
@@ -229,6 +239,9 @@ public final class HIDTouchscreenSource: TouchscreenSource {
             \(mouse == nil ? "no mouse interface" : "a mouse interface", privacy: .public)\
             \(touch.decoder == nil ? "; its report descriptor can't be read" : "", privacy: .public)
             """)
+        note(touchscreen, "Connected \(handle): \(Self.usbID(facts)) at \(Self.location(facts.locationID)); \(connected.maxContacts) contacts, "
+             + "\(size), \(mouse == nil ? "no mouse interface" : "a mouse interface")"
+             + (touch.decoder == nil ? "; its report descriptor can't be read" : ""))
         delegate?.touchscreenConnected(touchscreen.connected)
     }
 
@@ -236,6 +249,7 @@ public final class HIDTouchscreenSource: TouchscreenSource {
         touchscreen.mouse = mouse
         touchscreen.connected.hasMouseInterface = true
         log.info("\(touchscreen.handle, privacy: .public): its mouse interface arrived")
+        note(touchscreen, "\(touchscreen.handle): its mouse interface arrived")
         if touchscreen.state == .taken {
             if openForTaking(mouse, of: touchscreen) {
                 listen(to: mouse, of: touchscreen)
@@ -259,6 +273,7 @@ public final class HIDTouchscreenSource: TouchscreenSource {
             touchscreen.open = []
             touchscreens.removeAll { $0 === touchscreen }
             log.info("Disconnected \(touchscreen.handle, privacy: .public)")
+            note(touchscreen, "Disconnected \(touchscreen.handle)")
             delegate?.touchscreenDisconnected(touchscreen.handle)
             settleSoon()
         } else if let touchscreen = touchscreens.first(where: { $0.mouse?.id == id }) {
@@ -272,6 +287,7 @@ public final class HIDTouchscreenSource: TouchscreenSource {
             touchscreen.connected.hasMouseInterface = false
             if touchscreen.state == .taken { touchscreen.updateTakenStatus() }
             log.info("\(touchscreen.handle, privacy: .public): its mouse interface went")
+            note(touchscreen, "\(touchscreen.handle): its mouse interface went")
             announceChange(of: touchscreen)
             settleSoon()
         }
@@ -294,6 +310,7 @@ public final class HIDTouchscreenSource: TouchscreenSource {
         } else if touchOpen {
             inputMode = .noInputModeSetting
             log.info("\(touchscreen.handle, privacy: .public) has no Input Mode setting; left as it is")
+            note(touchscreen, "\(touchscreen.handle) has no Input Mode setting; left as it is")
         }
 
         listen(to: touchscreen.touch, of: touchscreen)
@@ -307,6 +324,8 @@ public final class HIDTouchscreenSource: TouchscreenSource {
             Took \(touchscreen.handle, privacy: .public): exclusive access \(status.exclusive.rawValue, privacy: .public), \
             input mode \(status.inputMode.rawValue, privacy: .public), touches \(status.touchOrigin.rawValue, privacy: .public)
             """)
+        note(touchscreen, "Took \(touchscreen.handle): exclusive access \(status.exclusive.rawValue), "
+             + "input mode \(status.inputMode.rawValue), touches \(status.touchOrigin.rawValue)")
     }
 
     /// Opens one interface for taking: exclusively, or shared if that fails. Returns whether it is open.
@@ -321,6 +340,7 @@ public final class HIDTouchscreenSource: TouchscreenSource {
         if seized == kIOReturnSuccess {
             touchscreen.open.append((interface.id, true))
             log.info("\(touchscreen.handle, privacy: .public): holding its \(role, privacy: .public) interface exclusively")
+            note(touchscreen, "\(touchscreen.handle): holding its \(role) interface exclusively")
             return true
         }
         let shared = system.open(interface.id, exclusive: false)
@@ -330,12 +350,16 @@ public final class HIDTouchscreenSource: TouchscreenSource {
                 \(touchscreen.handle, privacy: .public): its \(role, privacy: .public) interface can't be held exclusively \
                 (IOReturn \(IOResult.text(seized), privacy: .public)); reading it shared, so macOS may also respond
                 """)
+            note(touchscreen, "\(touchscreen.handle): its \(role) interface can't be held exclusively (IOReturn \(IOResult.text(seized))); "
+                 + "reading it shared")
             return true
         }
         log.error("""
             \(touchscreen.handle, privacy: .public): its \(role, privacy: .public) interface can't be opened \
             (exclusive: IOReturn \(IOResult.text(seized), privacy: .public); shared: IOReturn \(IOResult.text(shared), privacy: .public))
             """)
+        note(touchscreen, "\(touchscreen.handle): its \(role) interface can't be opened (exclusive: IOReturn \(IOResult.text(seized)); "
+             + "shared: IOReturn \(IOResult.text(shared)))")
         return false
     }
 
@@ -363,6 +387,7 @@ public final class HIDTouchscreenSource: TouchscreenSource {
             } else {
                 log.info("\(entry.text, privacy: .public)")
             }
+            note(touchscreen, entry.text)
             if Self.featureReadTimedOut(read) {
                 touchscreen.featureReadsTimedOut = true
                 return
@@ -380,6 +405,7 @@ public final class HIDTouchscreenSource: TouchscreenSource {
             \(touchscreen.handle, privacy: .public): Input Mode 2 (multi-touch) \(accepted ? "accepted" : "refused", privacy: .public) \
             (IOReturn \(IOResult.text(result), privacy: .public))
             """)
+        note(touchscreen, "\(touchscreen.handle): Input Mode 2 (multi-touch) \(accepted ? "accepted" : "refused") (IOReturn \(IOResult.text(result)))")
         return accepted ? .switchedToMultiTouch : .switchRefused
     }
 
@@ -402,6 +428,7 @@ public final class HIDTouchscreenSource: TouchscreenSource {
                 \(touchscreen.handle, privacy: .public): Input Mode 0 (mouse emulation) written back \
                 (IOReturn \(IOResult.text(result), privacy: .public))
                 """)
+            note(touchscreen, "\(touchscreen.handle): Input Mode 0 (mouse emulation) written back (IOReturn \(IOResult.text(result)))")
         }
         for open in touchscreen.open { system.close(open.id, exclusive: open.exclusive) }
         touchscreen.open = []
@@ -410,6 +437,7 @@ public final class HIDTouchscreenSource: TouchscreenSource {
         touchscreen.reader.reset()
         touchscreen.connected.status = DeviceStatus()
         log.info("Released \(touchscreen.handle, privacy: .public)")
+        note(touchscreen, "Released \(touchscreen.handle)")
     }
 
     // MARK: - Reports
@@ -424,6 +452,7 @@ public final class HIDTouchscreenSource: TouchscreenSource {
         if touchscreen.reader.origin != origin {
             touchscreen.connected.status.touchOrigin = touchscreen.reader.origin
             log.info("\(handle, privacy: .public): touches come from \(touchscreen.reader.origin.rawValue, privacy: .public)")
+            note(touchscreen, "\(handle): touches come from \(touchscreen.reader.origin.rawValue)")
             announceChange(of: touchscreen)
         }
         for frame in frames {

@@ -180,6 +180,8 @@ public final class SupportCheck {
     public enum Stage: Equatable, Sendable {
         /// Step 1 is known; nothing is taken yet.
         case ready
+        /// Step 2 under way: the device being opened and read.
+        case taking
         /// Step 3, with this many fingers.
         case touching(SupportFingers)
         /// The steps are over, and the device has been let go.
@@ -190,9 +192,11 @@ public final class SupportCheck {
     public enum Interruption: Equatable, Sendable {
         /// It wasn't connected any more when the check began.
         case notConnected
-        /// It was unplugged during the check.
+        /// None of its interfaces could be opened: something else holds it.
+        case couldNotOpen
+        /// It was unplugged during the check, or one of its interfaces went.
         case unplugged
-        /// The check was stopped.
+        /// The check was stopped: the window closed, or the Mac went to sleep.
         case stopped
     }
 
@@ -245,19 +249,34 @@ public final class SupportCheck {
 
     // MARK: - The steps
 
-    /// Step 2, then the first touch step from `time`.
-    public func start(at time: TimeInterval) {
+    /// Step 2, then the first touch step from `time`, which is read once the take is over (it can
+    /// take seconds: its reads run off the main thread). A device none of whose interfaces could be
+    /// opened ends the check at once.
+    public func start(at time: @autoclosure () -> TimeInterval) async {
         guard stage == .ready else { return }
-        guard let switches = probe.take(device, onReport: { [weak self] in self?.received($0) },
-                                        onGone: { [weak self] in self?.gone() }) else {
+        stage = .taking
+        onChange?()
+        let switches = await probe.take(device, onReport: { [weak self] in self?.received($0) },
+                                        onGone: { [weak self] in self?.gone(writeBack: $0) })
+        guard stage == .taking else {
+            // Stopped or unplugged meanwhile: whatever the take holds goes.
+            if switches != nil { writeBack = probe.release() ?? writeBack }
+            return
+        }
+        guard let switches else {
             interruption = .notConnected
-            stage = .finished
-            onChange?()
+            finish(releasing: false)
             return
         }
         self.switches = switches
-        makeReaders(opened: Set(switches.opens.filter { $0.held != .notOpened }.map(\.interface)))
-        begin(.one, at: time)
+        let opened = Set(switches.opens.filter { $0.held != .notOpened }.map(\.interface))
+        guard !opened.isEmpty else {
+            interruption = .couldNotOpen
+            finish(releasing: true)
+            return
+        }
+        makeReaders(opened: opened)
+        begin(.one, at: time())
     }
 
     /// Ends the step under way, keeping what came, and goes on to the next.
@@ -276,13 +295,18 @@ public final class SupportCheck {
         }
     }
 
-    /// Stops the check: the step under way ends, and the device is let go.
+    /// Stops the check: the step under way ends, and the device is let go (during the take, as soon
+    /// as its read under way returns).
     public func stop(at time: TimeInterval) {
         guard stage != .finished else { return }
         if case .touching = stage { close(.stopped, at: time) }
         interruption = .stopped
         finish(releasing: true)
     }
+
+    /// Whether the check ended before its steps were over: nothing it found can be relied on, so it
+    /// isn't sent; the person tries again.
+    public var wasInterrupted: Bool { interruption != nil }
 
     // MARK: - Reports
 
@@ -414,17 +438,19 @@ public final class SupportCheck {
     }
 
     private func finish(releasing: Bool) {
-        if releasing, switches != nil { writeBack = probe.release() }
+        if releasing { writeBack = probe.release() ?? writeBack }
         stage = .finished
         onChange?()
     }
 
-    /// The device was unplugged: the probe has let it go, writing nothing.
-    private func gone() {
+    /// The device, or one of its interfaces, went: the probe has let it go, writing 0 back only to a
+    /// touch interface still there.
+    private func gone(writeBack: SupportSwitches.ModeWrite?) {
         guard stage != .finished else { return }
         if case .touching = stage, let step = steps.last {
             close(.stopped, at: max(step.startedAt, step.reports.last?.time ?? step.startedAt))
         }
+        self.writeBack = writeBack ?? self.writeBack
         interruption = .unplugged
         finish(releasing: false)
     }

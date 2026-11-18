@@ -110,19 +110,27 @@ public struct SupportRawReport: Equatable, Sendable {
 /// The devices the touchscreen check can check, and one of them taken at a time.
 ///
 /// - **Listing** reads what the HID system describes and opens nothing (`SupportDevices`).
-/// - **Taking** a touchscreen or a digitiser does exactly what `HIDTouchscreenSource` does when it
-///   takes a touchscreen, in the same order: its touch interface, then its mouse sibling, each opened
-///   exclusively or else shared; the touch interface's feature reports that declare Contact Count
-///   Maximum or the certification blob read once each, in descriptor order, ending at a read that
-///   times out; whether it has Input Mode asked; 2 written where it has it; then both listened to.
-///   Each IOReturn, and the bytes each read returned, are recorded. Nothing else is read or written,
-///   and nothing on any other interface, a vendor interface included.
-/// - **A mouse-only device** has its pointers opened (exclusively, or shared) and listened to.
-///   Nothing is read from it and nothing written.
+/// - **Taking** a touchscreen or a digitiser with a touch interface does exactly what
+///   `HIDTouchscreenSource` does when it takes a touchscreen, in the same order: its touch
+///   interface, then its mouse sibling, each opened exclusively or else shared; the touch
+///   interface's feature reports that declare Contact Count Maximum or the certification blob read
+///   once each, in descriptor order, ending at a read that times out; whether it has Input Mode
+///   asked; 2 written where it has it; then both listened to. Each IOReturn, and the bytes each read
+///   returned, are recorded. Nothing else is read or written, and nothing on any other interface, a
+///   vendor interface included.
+/// - **The reads run off the main thread** (`HIDSystem.readFeatureReportInBackground`), so a panel
+///   slow to answer never freezes the window. After each one the take goes on only if it is still
+///   the one under way: a release asked for meanwhile closes what is open, and nothing more is done.
+/// - **A device with no touch interface** (mouse-only, or a digitiser Tactile can't tell about) has
+///   its listened interfaces opened (exclusively, or shared) and listened to. Nothing is read from
+///   it and nothing written.
 /// - **Releasing** does what the source does: reports stop; 0 is written if this take wrote a 2;
 ///   every interface is closed.
-/// - **Unplugging** any interface of the taken device ends the take: everything still open is
-///   closed, nothing is written to a device that has gone, and `onGone` is called.
+/// - **Unplugging.** When the touch interface goes (or, with none, the last listened interface),
+///   the device has gone: everything still open is closed and nothing is written. When another of
+///   its interfaces goes, the take ends as a release does, 0 written to the touch interface if this
+///   take wrote a 2, best effort. Either way `onGone` is called with what was written.
+/// - Every step is written in the log book (`DeviceLogBook`), keyed by `SupportDevice.logKey`.
 ///
 /// The touchscreen source must have let the device go first (the model releases a touchscreen while
 /// it is checked): a device Tactile holds exclusively can't be opened again.
@@ -133,6 +141,8 @@ public final class SupportProbe {
 
     private let system: HIDSystem
     private let log = Logger(subsystem: "com.crissmoldovan.tactile", category: "support")
+    /// Where the report reads what the check did.
+    private let logBook: DeviceLogBook
     private var isStarted = false
     /// While `start()` lists what is connected now: nobody is told until it returns.
     private var isStarting = false
@@ -144,27 +154,34 @@ public final class SupportProbe {
     private final class Taken {
         let device: SupportDevice
         let onReport: @MainActor (SupportRawReport) -> Void
-        let onGone: @MainActor () -> Void
+        let onGone: @MainActor (SupportSwitches.ModeWrite?) -> Void
         /// The interfaces open now, in the order they were opened, and whether each is held exclusively.
         var open: [(id: HIDInterfaceID, exclusive: Bool)] = []
         /// 2 was written to the touch interface, so releasing writes 0.
         var wroteInputMode = false
+        /// A read is under way off the main thread.
+        var isReading = false
+        /// A release was asked for while a read was under way: the take does it when the read returns.
+        var releaseAfterRead = false
 
         init(device: SupportDevice, onReport: @escaping @MainActor (SupportRawReport) -> Void,
-             onGone: @escaping @MainActor () -> Void) {
+             onGone: @escaping @MainActor (SupportSwitches.ModeWrite?) -> Void) {
             self.device = device
             self.onReport = onReport
             self.onGone = onGone
         }
     }
 
-    /// The live probe: IOKit's HID manager, watching digitisers, pointers and mice.
+    /// The live probe: IOKit's HID manager, watching digitisers, pointers and mice, writing to the
+    /// app's log book.
     public convenience init() {
-        self.init(system: IOKitHIDSystem(matching: .supportCheck))
+        self.init(system: IOKitHIDSystem(matching: .supportCheck), logBook: .shared)
     }
 
-    init(system: HIDSystem) {
+    /// `logBook` nil: one of its own, as the tests have.
+    init(system: HIDSystem, logBook: DeviceLogBook? = nil) {
         self.system = system
+        self.logBook = logBook ?? DeviceLogBook()
     }
 
     /// Every device the check can check, connected now, in the order they arrived.
@@ -195,88 +212,119 @@ public final class SupportProbe {
     // MARK: - Taking
 
     /// Takes `device` as the touchscreen source takes a touchscreen (see the type's description),
-    /// and hands each raw report to `onReport` until it is released. Returns what each call gave;
-    /// nil when the device is no longer connected. A device taken before is let go first.
+    /// and hands each raw report to `onReport` until it is released. Returns what each call gave; nil
+    /// when the device is no longer connected, or when it was released, unplugged or stopped before
+    /// the take was over. A device taken before is let go first.
     public func take(_ device: SupportDevice, onReport: @escaping @MainActor (SupportRawReport) -> Void,
-                     onGone: @escaping @MainActor () -> Void) -> SupportSwitches? {
+                     onGone: @escaping @MainActor (SupportSwitches.ModeWrite?) -> Void) async -> SupportSwitches? {
         guard isStarted else { return nil }
         release()
         let connected = device.interfaces.filter { interfaces[$0.id] != nil }
         guard !connected.isEmpty, connected.count == device.interfaces.count else {
             log.notice("Support check of \(device.usbID, privacy: .public): it is no longer connected")
+            note(device, "it is no longer connected")
             return nil
         }
         let taken = Taken(device: device, onReport: onReport, onGone: onGone)
         self.taken = taken
         var switches = SupportSwitches()
         log.info("Support check of \(device.usbID, privacy: .public) (\(device.kind.rawValue, privacy: .public)): taking it as Tactile takes a touchscreen")
+        note(device, "taking it (\(device.kind.rawValue)) as Tactile takes a touchscreen")
 
-        if device.touchInterface == nil {
+        guard let touch = device.touchInterface else {
             // A mouse-only device's pointers, or a digitiser's interfaces when none is known to take
             // touches: opened, never read or written.
-            for interface in device.listenedOnly {
-                switches.opens.append(open(interface, of: taken))
-            }
-        } else if let touch = device.touchInterface {
-            let touchOpen = open(touch, of: taken)
-            switches.opens.append(touchOpen)
-            if let mouse = device.interfaces.first(where: { $0.role == .mouse }) {
-                switches.opens.append(open(mouse, of: taken))
-            }
-            if touchOpen.held != .notOpened {
-                // GET, then SET, as the source does (as Linux does).
-                for report in interfaces[touch.id]?.decoder?.featureReportsToRead ?? [] {
-                    let read = system.readFeatureReport(touch.id, reportID: report.reportID, length: report.length)
-                    let recorded = SupportSwitches.FeatureRead(
-                        reportID: report.reportID, contents: report.contents.map(\.description), lengthAsked: report.length,
-                        lengthReturned: read.length, result: read.result, seconds: read.seconds, bytes: read.bytes,
-                        timedOut: HIDTouchscreenSource.featureReadTimedOut(read))
-                    switches.reads.append(recorded)
-                    log.info("""
-                        Support check of \(device.usbID, privacy: .public): read feature report \
-                        \(String(format: "0x%02X", report.reportID), privacy: .public): \(report.length, privacy: .public) bytes asked, \
-                        \(read.length, privacy: .public) returned (IOReturn \(IOResult.text(read.result), privacy: .public))
-                        """)
-                    if recorded.timedOut {
-                        switches.readsStoppedAfterTimeout = true
-                        break
-                    }
-                }
-                let hasInputMode = system.hasInputMode(touch.id)
-                switches.hasInputMode = hasInputMode
-                if hasInputMode {
-                    taken.wroteInputMode = true
-                    let result = system.writeInputMode(touch.id, 2)
-                    switches.inputModeWrite = SupportSwitches.ModeWrite(value: 2, result: result)
-                    log.info("Support check of \(device.usbID, privacy: .public): Input Mode 2 (multi-touch), IOReturn \(IOResult.text(result), privacy: .public)")
+            for interface in device.listenedOnly { switches.opens.append(open(interface, of: taken)) }
+            listen(device.listenedOnly, of: taken)
+            return switches
+        }
+
+        let touchOpen = open(touch, of: taken)
+        switches.opens.append(touchOpen)
+        let mouse = device.interfaces.first { $0.role == .mouse }
+        if let mouse { switches.opens.append(open(mouse, of: taken)) }
+        if touchOpen.held != .notOpened {
+            // GET, then SET, as the source does (as Linux does).
+            for report in interfaces[touch.id]?.decoder?.featureReportsToRead ?? [] {
+                taken.isReading = true
+                let read = await system.readFeatureReportInBackground(touch.id, reportID: report.reportID, length: report.length)
+                taken.isReading = false
+                guard stillTaking(taken) else { return nil }
+                let recorded = SupportSwitches.FeatureRead(
+                    reportID: report.reportID, contents: report.contents.map(\.description), lengthAsked: report.length,
+                    lengthReturned: read.length, result: read.result, seconds: read.seconds, bytes: read.bytes,
+                    timedOut: HIDTouchscreenSource.featureReadTimedOut(read))
+                switches.reads.append(recorded)
+                let line = "read feature report \(String(format: "0x%02X", report.reportID)): \(report.length) bytes asked, "
+                    + "\(read.length) returned in \(String(format: "%.3f", read.seconds)) s (IOReturn \(IOResult.text(read.result)))"
+                log.info("Support check of \(device.usbID, privacy: .public): \(line, privacy: .public)")
+                note(device, line)
+                if recorded.timedOut {
+                    switches.readsStoppedAfterTimeout = true
+                    note(device, "the read timed out, so no more are read")
+                    break
                 }
             }
+            let hasInputMode = system.hasInputMode(touch.id)
+            switches.hasInputMode = hasInputMode
+            if hasInputMode {
+                taken.wroteInputMode = true
+                let result = system.writeInputMode(touch.id, 2)
+                switches.inputModeWrite = SupportSwitches.ModeWrite(value: 2, result: result)
+                log.info("Support check of \(device.usbID, privacy: .public): Input Mode 2 (multi-touch), IOReturn \(IOResult.text(result), privacy: .public)")
+                note(device, "Input Mode 2 (multi-touch) written (IOReturn \(IOResult.text(result)))")
+            } else {
+                note(device, "it has no Input Mode setting; nothing written")
+            }
         }
-        // Listened to as the source listens: the touch interface, then its mouse; or the pointers.
-        let listened = device.touchInterface == nil
-            ? device.listenedOnly
-            : [device.touchInterface, device.interfaces.first { $0.role == .mouse }].compactMap { $0 }
-        for interface in listened where taken.open.contains(where: { $0.id == interface.id }) {
-            listen(to: interface, of: taken)
-        }
+        // Listened to as the source listens: the touch interface, then its mouse.
+        listen([touch] + (mouse.map { [$0] } ?? []), of: taken)
         return switches
     }
 
+    /// After a read: whether the take goes on. A release asked for meanwhile is done now, and one
+    /// that went (unplugged, or the probe stopped) has nothing left to do.
+    private func stillTaking(_ taken: Taken) -> Bool {
+        if taken.releaseAfterRead {
+            // Asked to let go, or one interface went, while the read was under way. Nothing has been
+            // written yet: the reads come before the write.
+            if self.taken === taken { self.taken = nil }
+            _ = close(taken, writingBack: true)
+            return false
+        }
+        return isStarted && self.taken === taken
+    }
+
     /// Lets the device taken go, as the source releases a touchscreen. Returns the write of 0, when
-    /// this take wrote a 2 and the touch interface is still open; nil otherwise.
+    /// this take wrote a 2 and the touch interface is still open; nil otherwise. Asked during a read,
+    /// it is done when the read returns, before anything else is written.
     @discardableResult
     public func release() -> SupportSwitches.ModeWrite? {
         guard let taken else { return nil }
+        if taken.isReading {
+            taken.releaseAfterRead = true
+            return nil
+        }
         self.taken = nil
+        return close(taken, writingBack: true)
+    }
+
+    /// Stops reports, writes 0 to the touch interface after a 2 when `writingBack` and it is still
+    /// connected and open, and closes everything.
+    private func close(_ taken: Taken, writingBack: Bool) -> SupportSwitches.ModeWrite? {
         for open in taken.open { system.stopReports(open.id) }
         var writeBack: SupportSwitches.ModeWrite?
-        if taken.wroteInputMode, let touch = taken.device.touchInterface, taken.open.contains(where: { $0.id == touch.id }) {
+        if writingBack, taken.wroteInputMode, let touch = taken.device.touchInterface, interfaces[touch.id] != nil,
+           taken.open.contains(where: { $0.id == touch.id }) {
             let result = system.writeInputMode(touch.id, 0)
             writeBack = SupportSwitches.ModeWrite(value: 0, result: result)
             log.info("Support check of \(taken.device.usbID, privacy: .public): Input Mode 0 (mouse emulation) written back, IOReturn \(IOResult.text(result), privacy: .public)")
+            note(taken.device, "Input Mode 0 (mouse emulation) written back (IOReturn \(IOResult.text(result)))")
         }
         for open in taken.open { system.close(open.id, exclusive: open.exclusive) }
+        taken.open = []
         log.info("Support check of \(taken.device.usbID, privacy: .public): let go")
+        note(taken.device, "let go")
         return writeBack
     }
 
@@ -285,26 +333,34 @@ public final class SupportProbe {
         let exclusive = system.open(interface.id, exclusive: true)
         if exclusive == kIOReturnSuccess {
             taken.open.append((interface.id, true))
+            note(taken.device, "holding its \(interface.role.rawValue) interface exclusively")
             return SupportSwitches.Open(interface: interface.id, role: interface.role, exclusiveResult: exclusive, sharedResult: nil)
         }
         let shared = system.open(interface.id, exclusive: false)
         if shared == kIOReturnSuccess { taken.open.append((interface.id, false)) }
-        log.notice("""
-            Support check of \(taken.device.usbID, privacy: .public): its \(interface.role.rawValue, privacy: .public) interface \
-            can't be held exclusively (IOReturn \(IOResult.text(exclusive), privacy: .public)); shared: IOReturn \
-            \(IOResult.text(shared), privacy: .public)
-            """)
+        let line = "its \(interface.role.rawValue) interface can't be held exclusively (IOReturn \(IOResult.text(exclusive))); "
+            + "shared: IOReturn \(IOResult.text(shared))"
+        log.notice("Support check of \(taken.device.usbID, privacy: .public): \(line, privacy: .public)")
+        note(taken.device, line)
         return SupportSwitches.Open(interface: interface.id, role: interface.role, exclusiveResult: exclusive, sharedResult: shared)
     }
 
-    private func listen(to interface: SupportInterface, of taken: Taken) {
-        let id = interface.id
-        let role = interface.role
-        let size = interfaces[id]?.reportBufferSize ?? InterfaceChoice.reportBufferSize(decoder: nil, maxInputReportSize: nil)
-        system.startReports(id, bufferSize: size) { [weak self, weak taken] bytes, time in
-            guard let self, let taken, self.taken === taken, taken.open.contains(where: { $0.id == id }) else { return }
-            taken.onReport(SupportRawReport(interface: id, role: role, bytes: bytes, time: time))
+    private func listen(_ listened: [SupportInterface], of taken: Taken) {
+        for interface in listened where taken.open.contains(where: { $0.id == interface.id }) {
+            let id = interface.id
+            let role = interface.role
+            let size = interfaces[id]?.reportBufferSize ?? InterfaceChoice.reportBufferSize(decoder: nil, maxInputReportSize: nil)
+            system.startReports(id, bufferSize: size) { [weak self, weak taken] bytes, time in
+                guard let self, let taken, self.taken === taken, taken.open.contains(where: { $0.id == id }) else { return }
+                taken.onReport(SupportRawReport(interface: id, role: role, bytes: bytes, time: time))
+            }
         }
+    }
+
+    /// Writes a line about `device` in the log book, as "Support check: …".
+    private func note(_ device: SupportDevice, _ text: String) {
+        guard let key = device.logKey else { return }
+        logBook.note(key, category: "support", "Support check: \(text)")
     }
 
     // MARK: - Interfaces coming and going
@@ -319,14 +375,29 @@ public final class SupportProbe {
     private func removed(_ id: HIDInterfaceID) {
         guard isStarted, interfaces.removeValue(forKey: id) != nil else { return }
         if let taken, taken.device.interfaces.contains(where: { $0.id == id }) {
-            // Unplugged. Nothing is written to a device that has gone.
             self.taken = nil
-            for open in taken.open {
-                system.stopReports(open.id)
-                system.close(open.id, exclusive: open.exclusive)
+            let device = taken.device
+            let hasGone = device.touchInterface.map { $0.id == id }
+                ?? !device.listenedOnly.contains { interfaces[$0.id] != nil }
+            let writeBack: SupportSwitches.ModeWrite?
+            if hasGone {
+                // Unplugged. Nothing is written to a device that has gone.
+                for open in taken.open {
+                    system.stopReports(open.id)
+                    system.close(open.id, exclusive: open.exclusive)
+                }
+                taken.open = []
+                writeBack = nil
+                log.info("Support check of \(device.usbID, privacy: .public): it was unplugged")
+                note(device, "it was unplugged")
+            } else {
+                // One interface went and the rest stays: let it go as a release does, best effort.
+                log.info("Support check of \(device.usbID, privacy: .public): one of its interfaces went; letting the rest go")
+                note(device, "its \(device.interfaces.first { $0.id == id }?.role.rawValue ?? "other") interface went; letting the rest go")
+                writeBack = taken.isReading ? nil : close(taken, writingBack: true)
+                if taken.isReading { taken.releaseAfterRead = true }
             }
-            log.info("Support check of \(taken.device.usbID, privacy: .public): it was unplugged")
-            taken.onGone()
+            taken.onGone(writeBack)
         }
         onDevicesChanged?()
     }

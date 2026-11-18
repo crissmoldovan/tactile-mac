@@ -30,6 +30,9 @@ protocol HIDSystem: AnyObject {
     /// source drops it: for the panels that need it, the read itself is what matters. The support
     /// check records it. Asked while the interface is open.
     func readFeatureReport(_ id: HIDInterfaceID, reportID: Int, length: Int) -> FeatureReportRead
+    /// The same read as `readFeatureReport`, made off the main thread, so a panel slow to answer
+    /// doesn't hold up the interface. The touchscreen check reads this way; the source doesn't.
+    func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead
     /// Writes the Input Mode feature: 0 mouse emulation, 2 multi-touch. Never reads it.
     func writeInputMode(_ id: HIDInterfaceID, _ value: Int) -> IOReturn
     /// Delivers each raw input report of an open interface, with its time on the host's clock in
@@ -37,6 +40,13 @@ protocol HIDSystem: AnyObject {
     func startReports(_ id: HIDInterfaceID, bufferSize: Int,
                       _ handler: @escaping @MainActor (_ bytes: [UInt8], _ time: TimeInterval) -> Void)
     func stopReports(_ id: HIDInterfaceID)
+}
+
+extension HIDSystem {
+    /// By default, the read on the main thread, as `readFeatureReport` makes it: the tests' system.
+    func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
+        readFeatureReport(id, reportID: reportID, length: length)
+    }
 }
 
 /// What one feature report read gave.

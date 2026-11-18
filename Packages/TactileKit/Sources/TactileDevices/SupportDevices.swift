@@ -91,6 +91,10 @@ public struct SupportDevice: Equatable, Sendable, Identifiable {
     /// The interface touches are read from, if it has one.
     public var touchInterface: SupportInterface? { interfaces.first { $0.role == .touch } }
 
+    /// The interface the log book keys this device's lines by: its touch interface (the touchscreen
+    /// source keys a touchscreen's lines by the same), else its first listened interface, else its first.
+    public var logKey: UInt64? { (touchInterface ?? listenedOnly.first ?? interfaces.first)?.id }
+
     /// The interfaces only listened to: a mouse-only device's pointers, or a digitiser's interfaces
     /// when none is known to take touches.
     public var listenedOnly: [SupportInterface] { interfaces.filter { $0.role == .pointer || $0.role == .digitizer } }

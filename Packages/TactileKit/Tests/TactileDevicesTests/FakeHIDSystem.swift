@@ -164,6 +164,22 @@ final class FakeHIDSystem: HIDSystem {
         return FeatureReportRead(result: result, length: returned, seconds: readSeconds, bytes: Array(given.prefix(returned)))
     }
 
+    /// Background reads wait for `resumeReads()`, as a panel slow to answer would hold them.
+    var suspendsReads = false
+    private var pendingReads: [CheckedContinuation<Void, Never>] = []
+    var readsWaiting: Int { pendingReads.count }
+
+    func resumeReads() {
+        let waiting = pendingReads
+        pendingReads = []
+        for read in waiting { read.resume() }
+    }
+
+    func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
+        if suspendsReads { await withCheckedContinuation { pendingReads.append($0) } }
+        return readFeatureReport(id, reportID: reportID, length: length)
+    }
+
     func writeInputMode(_ id: HIDInterfaceID, _ value: Int) -> IOReturn {
         calls.append(.writeInputMode(id, value))
         return writeResult
