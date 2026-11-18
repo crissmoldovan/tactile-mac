@@ -17,16 +17,12 @@ enum SupportCheckAvailability: Equatable, Sendable {
     case notConnected
     /// A set-up has the touchscreens: the model won't let go of one.
     case setUpRunning
-    /// Tactile holds it shared: something else holds it exclusively, so the check couldn't take it
-    /// as Tactile does, and the other program would act on every touch too.
-    case heldShared
 
-    /// Any connected touchscreen, whatever Tactile makes of it (one it can't use is just the kind to
-    /// check), unless a set-up runs or Tactile could only hold it shared.
+    /// Any connected touchscreen, whatever Tactile makes of it (one it can't use, or can only share
+    /// with macOS, is just the kind to check), unless a set-up runs.
     static func of(_ touchscreen: TouchscreenSnapshot, in snapshot: AppSnapshot) -> SupportCheckAvailability {
         guard touchscreen.isConnected else { return .notConnected }
         if snapshot.setUp != nil || snapshot.setUpMode != nil { return .setUpRunning }
-        if touchscreen.notes.contains(.macOSMayAlsoRespond) { return .heldShared }
         return .available
     }
 }

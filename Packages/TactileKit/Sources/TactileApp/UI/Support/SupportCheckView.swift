@@ -63,9 +63,15 @@ struct SupportCheckView: View {
                 Text(Wording.supportIntro)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Label(Wording.supportLetGo, systemImage: "hand.raised")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if session.macOSMayActToo {
+                    Label(Wording.supportShared, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Label(Wording.supportLetGo, systemImage: "hand.raised")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer()
                 let availability = session.startAvailability
                 HStack(alignment: .firstTextBaseline) {
@@ -173,6 +179,13 @@ struct SupportTouchArea: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Text(Wording.fingersSeen(step?.mostFingers ?? 0))
                         .foregroundStyle(.secondary)
+                    if session.macOSMayActToo {
+                        Text(Wording.supportShared)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .padding(24)
             }

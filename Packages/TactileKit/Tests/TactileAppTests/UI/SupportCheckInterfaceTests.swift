@@ -35,9 +35,10 @@ final class SupportCheckInterfaceTests: XCTestCase {
 
         var shared = ilitek
         shared.notes.append(.macOSMayAlsoRespond)
-        XCTAssertEqual(SupportCheckAvailability.of(shared, in: model.snapshot), .heldShared,
-                       "held shared: another program has it, and the check couldn't take it as Tactile does")
-        XCTAssertEqual(Wording.supportUnavailable(.heldShared), "Another program holds this touchscreen. Quit it, then try again.")
+        XCTAssertEqual(SupportCheckAvailability.of(shared, in: model.snapshot), .available,
+                       "held shared: still checked, and step 1 says macOS may act on its touches too")
+        XCTAssertEqual(Wording.supportShared,
+                       "Tactile can only share this touchscreen with macOS, so macOS may also act on your touches during the check.")
 
         model.perform(.beginSetUpMode)
         let settingUp = try XCTUnwrap(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek })
@@ -243,6 +244,7 @@ final class SupportCheckInterfaceTests: XCTestCase {
             Wording.supportStepSentence(3, kind: .touchscreen), Wording.sendSheetIntro, Wording.sendToDeveloper,
             Wording.verdictTitle(.doesNotWork), Wording.supportCantFind, Wording.supportLetGoRefused,
             Wording.supportInterruption(.couldNotOpen), Wording.sendingMayHaveBeenSent, Wording.readingTouchscreen,
+            Wording.supportShared,
         ]
         for text in words {
             XCTAssertFalse(text.contains("'"), text)

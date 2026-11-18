@@ -19,10 +19,13 @@ extension Wording {
         case .available: return ""
         case .notConnected: return "Connect it first."
         case .setUpRunning: return "Not while a set-up runs."
-        case .heldShared: return "Another program holds this touchscreen. Quit it, then try again."
         }
     }
 
+    /// Step 1, for a touchscreen Tactile can only share with macOS (or once the check has opened it
+    /// shared).
+    static let supportShared =
+        "Tactile can only share this touchscreen with macOS, so macOS may also act on your touches during the check."
     static let supportLetGoRefused = "Tactile couldn’t let go of the touchscreen just now. Try again in a moment."
     static let readingTouchscreen = "Reading the touchscreen…"
     static let interruptedTitle = "Interrupted"

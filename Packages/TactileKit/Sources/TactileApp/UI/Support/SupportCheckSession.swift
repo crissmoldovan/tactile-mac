@@ -124,8 +124,16 @@ final class SupportCheckSession {
 
     var device: SupportDevice? { check?.device }
 
+    /// Whether macOS may act on the touches during the check too: Tactile could only hold the
+    /// touchscreen shared, as the model's snapshot says, or the check opened it shared.
+    var macOSMayActToo: Bool {
+        if check?.switches?.opens.contains(where: { $0.held == .shared }) == true { return true }
+        guard let touchscreen, let listed = snapshot()?.touchscreens.first(where: { $0.id == touchscreen }) else { return false }
+        return listed.notes.contains(.macOSMayAlsoRespond)
+    }
+
     /// Whether Start Check can go ahead now: for a touchscreen Tactile lists, as the model's snapshot
-    /// says (no set-up running, not held shared); always for a device it doesn't.
+    /// says (no set-up running); always for a device it doesn't.
     var startAvailability: SupportCheckAvailability {
         guard let touchscreen else { return .available }
         guard let snapshot = snapshot(), let listed = snapshot.touchscreens.first(where: { $0.id == touchscreen }) else {

@@ -263,10 +263,6 @@ final class SupportCheckSessionTests: XCTestCase {
         if let index = shared.snapshot.touchscreens.firstIndex(where: { $0.id == UIFixtures.ilitek }) {
             shared.snapshot.touchscreens[index].notes.append(.macOSMayAlsoRespond)
         }
-        let heldShared = try desk(sending: .off, model: shared)
-        await start(heldShared.session)
-        XCTAssertEqual(heldShared.session.startRefusal, "Another program holds this touchscreen. Quit it, then try again.")
-        XCTAssertEqual(shared.commands, [])
 
         let refusing = FakeModel()
         refusing.letsGo = false
@@ -276,6 +272,25 @@ final class SupportCheckSessionTests: XCTestCase {
         XCTAssertEqual(refusing.commands, [.beginSupportCheck(UIFixtures.ilitek), .endSupportCheck])
         XCTAssertFalse(refused.system.calls.contains { $0.hasPrefix("open") }, "nothing it holds is touched")
         XCTAssertEqual(refused.session.check?.stage, .ready)
+    }
+
+    /// A touchscreen Tactile holds shared is checked like any other, once the model has let go, and
+    /// the window says macOS may act on its touches too.
+    func testATouchscreenHeldSharedIsCheckedAndSaysSo() async throws {
+        let shared = FakeModel()
+        if let index = shared.snapshot.touchscreens.firstIndex(where: { $0.id == UIFixtures.ilitek }) {
+            shared.snapshot.touchscreens[index].notes.append(.macOSMayAlsoRespond)
+        }
+        let desk = try desk(sending: .off, model: shared)
+        XCTAssertEqual(desk.session.startAvailability, .available)
+        XCTAssertTrue(desk.session.macOSMayActToo, "step 1 says so")
+        await start(desk.session)
+        XCTAssertNil(desk.session.startRefusal)
+        XCTAssertEqual(shared.commands, [.beginSupportCheck(UIFixtures.ilitek)], "the model lets go first")
+        XCTAssertTrue(desk.system.calls.contains("open 21"))
+
+        let plain = try self.desk(sending: .off)
+        XCTAssertFalse(plain.session.macOSMayActToo)
     }
 
     /// Closed while a read is under way off the main thread: Tactile takes the touchscreen back only
