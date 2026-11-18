@@ -149,6 +149,8 @@ final class SupportUploaderTests: XCTestCase {
         XCTAssertEqual(tooLarge, .refused(error: "too_large", reason: "The report is larger than 2 MB."))
         let limited = try await answer(429, #"{"error":"rate_limited","reason":"Too many."}"#)
         XCTAssertEqual(limited, .tryLater)
+        let slow = try await answer(408, #"{"error":"too_slow"}"#)
+        XCTAssertEqual(slow, .tooSlow)
 
         for (status, body) in [(503, #"{"error":"support_unavailable"}"#), (502, #"{"error":"upstream"}"#), (500, ""), (504, "<html>"),
                                (400, "not json"), (400, #"{"error":"x"}"#), (404, ""), (200, #"{"status":"check-email"}"#),
@@ -214,6 +216,13 @@ final class SupportUploaderTests: XCTestCase {
     func testA503AfterTheStatusSaidYesIsUnavailable() async throws {
         let unavailable = try await answer(503, #"{"error":"support_unavailable"}"#)
         XCTAssertEqual(unavailable, .unavailable)
+    }
+
+    func testAnUploadThatTimesOutTookTooLong() async throws {
+        let transport = FakeTransport()
+        transport.failure = URLError(.timedOut)
+        let answer = await SupportUploader(site: site, transport: transport).send(try request())
+        XCTAssertEqual(answer, .tooSlow)
     }
 
     func testANetworkFailureIsUnavailable() async throws {

@@ -96,6 +96,9 @@ public enum SupportAnswer: Equatable, Sendable {
     case refused(error: String, reason: String)
     /// 429: too many requests from here for now.
     case tryLater
+    /// 408 (`too_slow`), or the upload timed out here: it took too long. The person can save the
+    /// report, or try again.
+    case tooSlow
     /// 503 (`support_unavailable`, sending not switched on yet), 502, any other 5xx, a network
     /// failure, an answer not from the site, anything else: the report wasn't filed. Save Report… is
     /// the way.
@@ -196,6 +199,8 @@ public struct SupportUploader: Sendable {
             let (data, result) = try await transport.perform(urlRequest)
             guard let from = result.url, site.isOnSite(from) else { return .unavailable }
             return Self.answer(status: result.status, body: data)
+        } catch let error as URLError where error.code == .timedOut {
+            return .tooSlow
         } catch {
             return .unavailable
         }
@@ -239,6 +244,8 @@ public struct SupportUploader: Sendable {
             return .sent
         case 429:
             return .tryLater
+        case 408:
+            return .tooSlow
         case 400..<500:
             guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
                   let error = object["error"] as? String, let reason = object["reason"] as? String
