@@ -62,13 +62,14 @@ extension Wording {
     static let supportStepTitles = ["What it is", "Switches", "Touches", "Verdict"]
 
     /// The plain sentence under step `index` (0 to 3).
-    static func supportStepSentence(_ index: Int, kind: SupportDeviceKind) -> String {
+    static func supportStepSentence(_ index: Int, kind: SupportDeviceKind, hasTouchInterface: Bool = true) -> String {
         switch index {
         case 0: return "What it says about itself. Nothing is written to it."
         case 1:
-            return kind == .mouseOnly
-                ? "It only acts as a mouse, so there is nothing to switch."
-                : "Tactile takes it as it always does: it reads its settings, then switches it to multi-touch where it can."
+            if kind == .mouseOnly { return "It only acts as a mouse, so there is nothing to switch." }
+            return hasTouchInterface
+                ? "Tactile takes it as it always does: it reads its settings, then switches it to multi-touch where it can."
+                : "Tactile can’t tell which part of it takes touches, so it switches nothing."
         case 2: return "Touch it when asked. Each step lasts up to 15 seconds."
         default: return "What Tactile made of it."
         }
@@ -100,7 +101,7 @@ extension Wording {
     static func switchesLine(_ switches: SupportSwitches?, kind: SupportDeviceKind) -> String? {
         guard let switches else { return nil }
         if switches.opens.allSatisfy({ $0.held == .notOpened }) { return "It couldn’t be opened." }
-        if kind == .mouseOnly { return "Opened. Nothing to switch." }
+        if kind != .touchscreen, switches.hasInputMode == nil { return "Opened. Nothing to switch." }
         if switches.hasInputMode == true {
             return switches.inputModeWrite?.result == 0 ? "Switched to multi-touch." : "It refused the switch to multi-touch."
         }

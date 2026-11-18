@@ -347,6 +347,8 @@ public enum SupportReport {
             why = "the device wasn't connected when the check began"
         } else if input.device.kind == .mouseOnly {
             why = "mouse-only: it has no touch interface to read or switch"
+        } else if input.device.touchInterface == nil {
+            why = "digitiser: no Touch Screen or Touch Pad interface, so Tactile read and switched nothing; its digitiser interfaces were only listened to"
         } else {
             why = nil
         }
@@ -538,6 +540,8 @@ public enum SupportReport {
         if let switches = input.switches {
             if device.kind == .mouseOnly {
                 lines.append("Skipped: it is only a mouse, so there is nothing to read or switch.")
+            } else if device.touchInterface == nil {
+                lines.append("Skipped: Tactile can’t tell which interface takes touches, so it read and switched nothing.")
             }
             for open in switches.opens {
                 let number = numbers[open.interface] ?? 0
@@ -561,7 +565,7 @@ public enum SupportReport {
                 lines.append(line)
             }
             if let maximum = input.contactCountMaximum { lines.append("Contact Count Maximum: \(maximum).") }
-            if device.kind != .mouseOnly {
+            if device.touchInterface != nil {
                 switch switches.hasInputMode {
                 case true?:
                     if let write = switches.inputModeWrite {

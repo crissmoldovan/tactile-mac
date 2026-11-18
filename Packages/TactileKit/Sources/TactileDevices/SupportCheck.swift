@@ -290,10 +290,19 @@ public final class SupportCheck {
         let decoder = { (role: SupportInterface.Role) -> (UInt64, InterfaceDecoder?)? in
             self.device.interfaces.first { $0.role == role && opened.contains($0.id) }.map { ($0.id, self.decoders[$0.id]) }
         }
-        if device.kind == .mouseOnly {
-            for (index, pointer) in device.interfaces.enumerated() where pointer.role == .pointer && opened.contains(pointer.id) {
-                readers[index] = TouchscreenReader(touch: nil, mouse: decoders[pointer.id])
-                readerOf[pointer.id] = (index, .mouse)
+        if device.touchInterface == nil {
+            // Each listened interface read by itself: a pointer as a mouse, a digitiser's as a touch interface.
+            for (index, interface) in device.interfaces.enumerated() where opened.contains(interface.id) {
+                switch interface.role {
+                case .pointer:
+                    readers[index] = TouchscreenReader(touch: nil, mouse: decoders[interface.id])
+                    readerOf[interface.id] = (index, .mouse)
+                case .digitizer:
+                    readers[index] = TouchscreenReader(touch: decoders[interface.id], mouse: nil)
+                    readerOf[interface.id] = (index, .touch)
+                case .touch, .mouse, .other:
+                    break
+                }
             }
         } else {
             let touch = decoder(.touch), mouse = decoder(.mouse)

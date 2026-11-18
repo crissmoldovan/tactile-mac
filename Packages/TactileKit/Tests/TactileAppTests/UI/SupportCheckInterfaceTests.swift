@@ -218,6 +218,7 @@ final class SupportCheckInterfaceTests: XCTestCase {
             Wording.helpMeSupport, Wording.supportExplanation, Wording.notListedExplanation, Wording.notListedNone,
             Wording.supportIntro, Wording.supportLetGo, Wording.supportStepSentence(0, kind: .touchscreen),
             Wording.supportStepSentence(1, kind: .mouseOnly), Wording.supportStepSentence(2, kind: .touchscreen),
+            Wording.supportStepSentence(1, kind: .digitizer, hasTouchInterface: false),
             Wording.supportStepSentence(3, kind: .touchscreen), Wording.sendSheetIntro, Wording.sendToDeveloper,
             Wording.verdictTitle(.doesNotWork), Wording.supportCantFind,
         ]

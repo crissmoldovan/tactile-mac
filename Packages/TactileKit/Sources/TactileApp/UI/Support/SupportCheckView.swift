@@ -97,7 +97,8 @@ struct SupportStepList: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("\(index + 1). \(Wording.supportStepTitles[index])")
                             .fontWeight(marks[index] == .current ? .semibold : .regular)
-                        Text(Wording.supportStepSentence(index, kind: check.device.kind))
+                        Text(Wording.supportStepSentence(index, kind: check.device.kind,
+                                                         hasTouchInterface: check.device.touchInterface != nil))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

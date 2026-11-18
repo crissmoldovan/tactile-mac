@@ -211,9 +211,11 @@ public final class SupportProbe {
         var switches = SupportSwitches()
         log.info("Support check of \(device.usbID, privacy: .public) (\(device.kind.rawValue, privacy: .public)): taking it as Tactile takes a touchscreen")
 
-        if device.kind == .mouseOnly {
-            for pointer in device.interfaces where pointer.role == .pointer {
-                switches.opens.append(open(pointer, of: taken))
+        if device.touchInterface == nil {
+            // A mouse-only device's pointers, or a digitiser's interfaces when none is known to take
+            // touches: opened, never read or written.
+            for interface in device.listenedOnly {
+                switches.opens.append(open(interface, of: taken))
             }
         } else if let touch = device.touchInterface {
             let touchOpen = open(touch, of: taken)
@@ -251,8 +253,8 @@ public final class SupportProbe {
             }
         }
         // Listened to as the source listens: the touch interface, then its mouse; or the pointers.
-        let listened = device.kind == .mouseOnly
-            ? device.interfaces.filter { $0.role == .pointer }
+        let listened = device.touchInterface == nil
+            ? device.listenedOnly
             : [device.touchInterface, device.interfaces.first { $0.role == .mouse }].compactMap { $0 }
         for interface in listened where taken.open.contains(where: { $0.id == interface.id }) {
             listen(to: interface, of: taken)
