@@ -1,57 +1,48 @@
 import Foundation
+import TactileDevices
 import TactileSupport
 import XCTest
 
-/// Tactile's own log lines about one touchscreen, as the report keeps them: found by its USB ID and
-/// the handle Tactile gave it, with every serial number and the home folder taken out. The entries
-/// are made here: nothing reads the system's log.
+/// The report's log: the log book's lines about the device checked, found by its interfaces, never
+/// by its product or USB ID, which a second unit of the same model shares; redacted once more with
+/// every serial number Tactile knows. Nothing here reads the system's log.
+@MainActor
 final class SupportLogTests: XCTestCase {
 
     private let start = Date(timeIntervalSince1970: 1_795_000_000.125)
 
-    private func entry(_ seconds: Double, _ category: String, _ message: String) -> SupportLogEntry {
-        SupportLogEntry(date: start.addingTimeInterval(seconds), category: category, message: message)
+    /// Unit A (touch interface 21, mouse 22) and unit B (41, 42): the same model, two serials.
+    private func twoUnits() -> DeviceLogBook {
+        var clock = start
+        let book = DeviceLogBook(now: { defer { clock += 1 }; return clock })
+        book.note(21, category: "devices", "Connected device-1: 222a:0001 at 0x01141000; 10 contacts")
+        book.note(41, category: "devices", "Connected device-2: 222a:0001 at 0x01151000; 10 contacts")
+        book.note(21, category: "devices", "Took device-1: exclusive access held, input mode noInputModeSetting")
+        book.note(41, category: "devices", "device-2: its mouse interface went")
+        book.note(21, category: "support", "Support check: let go")
+        return book
     }
 
-    private var desk: [SupportLogEntry] {
-        [
-            entry(0, "app", "Tactile 0.7.0 starting (pid 4242, /Users/someone/Applications/Tactile.app)"),
-            entry(1, "devices", #"Connected device-3: 222a:0001 "ILITEK-TP" serial "V06.00.00.00" at 0x01141000; 10 contacts"#),
-            entry(1.1, "devices", #"Connected device-4: 27c0:0859 "TouchScreen" serial "TEST-SERIAL-0001" at 0x01130000; 10 contacts"#),
-            entry(2, "devices", "device-3: holding its touchscreen interface exclusively"),
-            entry(2.1, "devices", "device-4: holding its touchscreen interface exclusively"),
-            entry(3, "devices", "device-31: holding its touchscreen interface exclusively"),
-            entry(4, "model", "Connected: device-3 222a:0001 ILITEK-TP"),
-            entry(5, "support", "Support check of 222a:0001 (touchscreen): taking it as Tactile takes a touchscreen"),
-            entry(6, "model", "Settings saved to /Users/someone/Library/Application Support/Tactile/settings.json"),
-        ]
-    }
-
-    func testOnlyThisTouchscreensLinesAreKept() {
-        let lines = SupportLog.lines(desk, usbID: "222a:0001", location: "01141000", serials: ["V06.00.00.00"], home: nil)
+    func testOnlyTheCheckedUnitsLinesAreKept() {
+        let lines = SupportLog.lines(twoUnits().entries(about: [21, 22]), serials: [], home: nil)
         XCTAssertEqual(lines, [
-            #"2026-11-18T11:06:41.125Z [devices] Connected device-3: 222a:0001 "ILITEK-TP" serial "[serial removed]" at 0x01141000; 10 contacts"#,
-            "2026-11-18T11:06:42.125Z [devices] device-3: holding its touchscreen interface exclusively",
-            "2026-11-18T11:06:44.125Z [model] Connected: device-3 222a:0001 ILITEK-TP",
-            "2026-11-18T11:06:45.125Z [support] Support check of 222a:0001 (touchscreen): taking it as Tactile takes a touchscreen",
+            "2026-11-18T11:06:40.125Z [devices] Connected device-1: 222a:0001 at 0x01141000; 10 contacts",
+            "2026-11-18T11:06:42.125Z [devices] Took device-1: exclusive access held, input mode noInputModeSetting",
+            "2026-11-18T11:06:44.125Z [support] Support check: let go",
         ])
+        XCTAssertFalse(lines.joined().contains("device-2"), "nothing of the other unit")
     }
 
-    func testTwoOfTheSameModelAreToldApartByWhereTheyArePlugged() {
-        var entries = desk
-        entries.append(entry(7, "devices", #"Connected device-5: 222a:0001 "ILITEK-TP" serial "OTHER-UNIT-0002" at 0x01142000; 10 contacts"#))
-        entries.append(entry(8, "devices", "device-5: holding its touchscreen interface exclusively"))
-        let lines = SupportLog.lines(entries, usbID: "222a:0001", location: "01141000", serials: ["V06.00.00.00"], home: nil)
-        XCTAssertFalse(lines.contains { $0.contains("device-5") }, "\(lines)")
-        XCTAssertFalse(lines.joined().contains("OTHER-UNIT-0002"))
-        XCTAssertEqual(lines.count, 4)
-    }
-
-    func testADeviceTactileDoesntListHasOnlyTheChecksLines() {
-        let entries = [entry(0, "support", "Support check of 1234:5678 (mouse-only): taking it as Tactile takes a touchscreen")] + desk
-        let lines = SupportLog.lines(entries, usbID: "1234:5678", location: "01200000", serials: ["POINTER-SERIAL-0042"], home: nil)
-        XCTAssertEqual(lines.count, 1)
-        XCTAssertEqual(SupportLog.lines(desk, usbID: "1234:5678", location: nil, serials: [], home: nil), [])
+    /// The shapes Tactile's own log gives a touchscreen (`vvvv:pppp:<serial>`, `@<location>:…`, a
+    /// command naming it), for a second unit of the same model: none can reach the report, as only the
+    /// log book is read; and were one written there, every known serial is taken out.
+    func testASecondUnitsSerialNeverReachesTheReport() {
+        let book = twoUnits()
+        book.note(21, category: "devices", "222a:0001:UNIT-B-0002: nothing for 0.6 s with fingers down; the lift was lost")
+        book.note(21, category: "devices", "Command setShowsCircles(@01151000:222a:0001:UNIT-B-0002, true)")
+        let lines = SupportLog.lines(book.entries(about: [21, 22]), serials: ["UNIT-A-0001", "UNIT-B-0002"], home: nil)
+        XCTAssertFalse(lines.joined().contains("UNIT-B"))
+        XCTAssertTrue(lines.contains { $0.hasSuffix("222a:0001:[serial removed]: nothing for 0.6 s with fingers down; the lift was lost") })
     }
 
     func testSerialNumbersAreRemoved() {
@@ -62,6 +53,10 @@ final class SupportLogTests: XCTestCase {
                        #"Serial: "[serial removed]", serial ''"#)
         XCTAssertEqual(SupportRedaction.redact("report 12 of 120", serials: ["12", ""], home: nil), "report 12 of 120",
                        "a serial shorter than four characters is too common to take out")
+        XCTAssertEqual(SupportRedaction.redact(#"serial "AB"CD-0001" here"#, serials: [#"AB"CD-0001"#], home: nil),
+                       #"serial "[serial removed]" here"#, "a quote inside a serial doesn't stop it short")
+        XCTAssertEqual(SupportRedaction.redact("A-12345 and A-1234", serials: ["A-1234", "A-12345"], home: nil),
+                       "[serial removed] and [serial removed]", "the longest first")
     }
 
     func testTheHomeFolderAndUserNameAreRemoved() {

@@ -448,6 +448,7 @@ public enum SupportReport {
     private static func interruptionText(_ interruption: SupportCheck.Interruption) -> String {
         switch interruption {
         case .notConnected: return "not connected"
+        case .couldNotOpen: return "could not be opened"
         case .unplugged: return "unplugged"
         case .stopped: return "stopped"
         }
@@ -505,6 +506,7 @@ public enum SupportReport {
         lines.append("Verdict: \(verdictText(input.verdict)). \(reasonText(input.verdictReason))")
         switch input.interruption {
         case .notConnected?: lines.append("The check stopped: it wasn’t connected when the check began.")
+        case .couldNotOpen?: lines.append("The check stopped: none of its interfaces could be opened.")
         case .unplugged?: lines.append("The check stopped: it was unplugged.")
         case .stopped?: lines.append("The check was stopped before its end.")
         case nil: break

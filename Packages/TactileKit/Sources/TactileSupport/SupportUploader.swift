@@ -189,6 +189,12 @@ public struct SupportUploader: Sendable {
     /// Asks whether the site takes reports, and only then uploads.
     public func send(_ request: SupportRequest) async -> SupportAnswer {
         guard await isAvailable() else { return .unavailable }
+        return await upload(request)
+    }
+
+    /// Uploads, without asking first: the caller has asked (`isAvailable`). Cancelling the task
+    /// cancels the request, though what has already reached the site stays there.
+    public func upload(_ request: SupportRequest) async -> SupportAnswer {
         let boundary = boundary()
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
