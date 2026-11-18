@@ -206,7 +206,8 @@ func run(_ arguments: [String]) -> Int32 {
         for number in [SIGINT, SIGTERM, SIGHUP, SIGQUIT] {
             signal(number, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
-            source.setEventHandler { MainActor.assumeIsolated { check.interrupt(number) } }
+            // The closure's type is spelled out: Xcode 26's compiler can't infer it from a call that never returns.
+            source.setEventHandler { MainActor.assumeIsolated { () -> Void in check.interrupt(number) } }
             source.resume()
             check.signalSources.append(source)
         }
