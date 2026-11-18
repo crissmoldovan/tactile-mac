@@ -56,9 +56,12 @@ public enum AppCommand: Equatable, Sendable {
     case setGestureTesterPerformsSwipes(Bool)
     /// The tester's **Clear**: empties `recent` and counts `seen` again from nothing.
     case clearGestureTester
-    /// The touchscreen check is about to take this touchscreen: Tactile lets go of it until
-    /// `endSupportCheck`, so the check can take it exactly as Tactile does. Refused while a set-up runs.
-    case beginSupportCheck(TouchscreenID)
-    /// The check has let the touchscreen go: Tactile takes it back.
-    case endSupportCheck
+    /// A touchscreen check is about to take this touchscreen, under its own `claim`: Tactile lets go
+    /// of it while any check's claim is held, so the check can take it exactly as Tactile does.
+    /// Refused while a set-up runs.
+    case beginSupportCheck(TouchscreenID, claim: UUID)
+    /// The check with this claim has let the touchscreen go. Only its own claim goes: Tactile takes
+    /// the touchscreen back once no claim is left. A claim that isn't held (given back already, or
+    /// never accepted) changes nothing.
+    case endSupportCheck(claim: UUID)
 }

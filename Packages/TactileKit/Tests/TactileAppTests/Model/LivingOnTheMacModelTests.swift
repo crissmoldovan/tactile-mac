@@ -445,7 +445,7 @@ final class LivingOnTheMacModelTests: XCTestCase {
             .setRecordsFrames(false), .copyDiagnostics, .setSwipesFollowFingers(true), .openLoginItemsSettings,
             .beginSetUpMode, .setUpChoose(displayID: Desk.hdmi.displayID), .setUpBack,
             .openGestureTester(ilitek), .setGestureTesterPerformsSwipes(true), .clearGestureTester, .closeGestureTester,
-            .beginSupportCheck(ilitek), .endSupportCheck,
+            .beginSupportCheck(ilitek, claim: UUID()), .endSupportCheck(claim: UUID()),
         ]
         XCTAssertEqual(Set(commands.map(Self.caseIndex)),
                        Set(0..<Self.appCommandCases).subtracting([Self.caseIndex(.setLaunchAtLogin(true))]),

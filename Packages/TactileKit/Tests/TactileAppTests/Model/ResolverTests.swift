@@ -53,7 +53,7 @@ final class ResolverTests: XCTestCase {
                 stripDrives: false),
             Row(rule: "4a", change: { $0.isAsleep = true }, mode: .released, state: .released, status: paired,
                 stripDrives: false),
-            Row(rule: "4b", change: { $0.supportCheck = Desk.ilitekID }, mode: .released, state: .released, status: paired,
+            Row(rule: "4b", change: { $0.supportChecks = [UUID(): Desk.ilitekID] }, mode: .released, state: .released, status: paired,
                 stripDrives: true),
             Row(rule: "4c", change: { $0.records[Desk.ilitekHandle] = nil }, mode: .held, state: .taken,
                 status: .notSetUp, stripDrives: true),
@@ -97,15 +97,16 @@ final class ResolverTests: XCTestCase {
     func testATouchscreenBeingCheckedIsLetGo() throws {
         var inputs = Desk.inputs
         XCTAssertTrue(Resolver.canRunSetUp(Desk.ilitekID, inputs))
-        inputs.supportCheck = Desk.ilitekID
+        let claim = UUID()
+        inputs.supportChecks = [claim: Desk.ilitekID]
         let resolved = Resolved(inputs)
         XCTAssertEqual(resolved.ilitek?.rule, .supportCheck)
         XCTAssertEqual(resolved.ilitek?.deviceState, .released)
         XCTAssertEqual(resolved.strip?.mode, .driving)
         XCTAssertFalse(Resolver.canRunSetUp(Desk.ilitekID, inputs))
         XCTAssertTrue(Resolver.canRunSetUp(Desk.stripID, inputs))
-        XCTAssertEqual(Resolver.apply(.beginSupportCheck(Desk.ilitekID), to: inputs), inputs.settings, "no setting changes")
-        XCTAssertEqual(Resolver.apply(.endSupportCheck, to: inputs), inputs.settings)
+        XCTAssertEqual(Resolver.apply(.beginSupportCheck(Desk.ilitekID, claim: claim), to: inputs), inputs.settings, "no setting changes")
+        XCTAssertEqual(Resolver.apply(.endSupportCheck(claim: claim), to: inputs), inputs.settings)
 
         inputs.setUpMode = SetUpModeSnapshot(stage: .choosing, displays: [], touchscreens: [], justSetUp: nil, notice: nil)
         XCTAssertEqual(Resolved(inputs).ilitek?.deviceState, .released, "set-up mode doesn't take it back")

@@ -27,9 +27,12 @@ struct SupportSessionEnvironment {
     var ticks: Bool
     var temporary: URL
     var home: String
+    /// The checks still letting go, which a new check of the same device waits for.
+    var finishing: SupportChecksFinishing
 
     /// The app's: IOKit, the update decision (only the official build sends, to its update site),
-    /// URLSession, the app's log book, this Mac, `systemUptime`.
+    /// URLSession, the app's log book, this Mac, `systemUptime`, the app's register of checks still
+    /// letting go.
     @MainActor
     static func live() -> SupportSessionEnvironment {
         SupportSessionEnvironment(
@@ -38,7 +41,32 @@ struct SupportSessionEnvironment {
                 UpdateAvailability.current(), overrideBaseURL: UserDefaults.standard.string(forKey: UpdateSite.overrideKey)),
             transport: URLSessionSupportTransport(), logBook: .shared,
             mac: { SupportMac.current(displays: NSScreen.screens.count) }, now: { ProcessInfo.processInfo.systemUptime },
-            ticks: true, temporary: FileManager.default.temporaryDirectory, home: NSHomeDirectory())
+            ticks: true, temporary: FileManager.default.temporaryDirectory, home: NSHomeDirectory(), finishing: .shared)
+    }
+}
+
+/// The checks closed during a read that haven't let go of their device yet: a new check of the same
+/// device couldn't open it, so Start Check, and Help Me Support in the pane and the menu, wait for
+/// them (`SupportCheckAvailability.lastCheckFinishing`). Each clears by itself when its check lets go.
+@MainActor
+@Observable
+final class SupportChecksFinishing {
+    static let shared = SupportChecksFinishing()
+
+    private var touchscreens: [TouchscreenID: Int] = [:]
+    private var devices: [String: Int] = [:]
+
+    func isFinishing(_ touchscreen: TouchscreenID) -> Bool { touchscreens[touchscreen, default: 0] > 0 }
+    func isFinishing(device: String) -> Bool { devices[device, default: 0] > 0 }
+
+    func began(touchscreen: TouchscreenID?, device: String) {
+        if let touchscreen { touchscreens[touchscreen, default: 0] += 1 }
+        devices[device, default: 0] += 1
+    }
+
+    func ended(touchscreen: TouchscreenID?, device: String) {
+        if let touchscreen { touchscreens[touchscreen] = max(0, touchscreens[touchscreen, default: 0] - 1) }
+        devices[device] = max(0, devices[device, default: 0] - 1)
     }
 }
 
@@ -46,10 +74,13 @@ struct SupportSessionEnvironment {
 /// Nothing leaves the Mac until Send, and nothing is kept once it closes.
 ///
 /// - **Start Check** goes ahead only while Tactile can let go of the touchscreen it lists
-///   (`startAvailability`, from the model's snapshot now), and only once the model has let go of it:
-///   otherwise it says why, and opens nothing.
+///   (`startAvailability`, from the model's snapshot now) and no earlier check of the device is still
+///   letting go, and only once the model has let go of it: otherwise it says why, and opens nothing.
+/// - **Each check holds a claim of its own** on the touchscreen (`claim`): the model lets go while
+///   any claim is held, and a check's hand-back clears only its own.
 /// - **Tactile takes the touchscreen back** once the check has let the device go, on every way out,
-///   and never while the check still holds it (a read can be under way off the main thread).
+///   and never while the check still holds it (a read can be under way off the main thread). A check
+///   closed during a read is noted in `SupportChecksFinishing` until then.
 /// - **An interrupted check** (sleep, unplugging, a device that couldn't be opened) has no verdict
 ///   and no report: the person tries again.
 /// - **Sending** asks the site whether it takes reports only when the person presses Send. Stop
@@ -84,6 +115,9 @@ final class SupportCheckSession {
     /// Closes the window: Done. The window sets it.
     @ObservationIgnored var close: @MainActor () -> Void = {}
 
+    /// This check's own claim on the touchscreen, given to the model to let go and to take back.
+    let claim = UUID()
+
     @ObservationIgnored private let environment: SupportSessionEnvironment
     @ObservationIgnored private let perform: PerformCommand
     @ObservationIgnored private let snapshot: @MainActor () -> AppSnapshot?
@@ -98,6 +132,8 @@ final class SupportCheckSession {
     @ObservationIgnored private(set) var sendingTask: Task<Void, Never>?
     /// The upload itself began: the report may have reached the site.
     @ObservationIgnored private var uploadBegan = false
+    /// Stopped during the take: noted in `SupportChecksFinishing` until the device is let go.
+    @ObservationIgnored private var isFinishing = false
 
     /// Starts listing devices, and finds the one that is `touchscreen`, or else `deviceID`'s. Nothing
     /// is opened yet. `snapshot` is the model's now, for a touchscreen it lists.
@@ -135,11 +171,13 @@ final class SupportCheckSession {
     /// Whether Start Check can go ahead now: for a touchscreen Tactile lists, as the model's snapshot
     /// says (no set-up running); always for a device it doesn't.
     var startAvailability: SupportCheckAvailability {
-        guard let touchscreen else { return .available }
+        let deviceFinishing = device.map { environment.finishing.isFinishing(device: $0.id) } ?? false
+        guard let touchscreen else { return SupportCheckAvailability.available.whileFinishing(deviceFinishing) }
         guard let snapshot = snapshot(), let listed = snapshot.touchscreens.first(where: { $0.id == touchscreen }) else {
             return .notConnected
         }
-        return SupportCheckAvailability.of(listed, in: snapshot)
+        return SupportCheckAvailability.of(
+            listed, in: snapshot, finishing: deviceFinishing || environment.finishing.isFinishing(touchscreen))
     }
 
     // MARK: - The steps
@@ -148,16 +186,16 @@ final class SupportCheckSession {
     /// off the main thread.
     func start() {
         guard let check, check.stage == .ready, starting == nil else { return }
+        let availability = startAvailability
+        guard availability == .available else {
+            startRefusal = Wording.supportUnavailable(availability)
+            return
+        }
         if let touchscreen {
-            let availability = startAvailability
-            guard availability == .available else {
-                startRefusal = Wording.supportUnavailable(availability)
-                return
-            }
-            perform(.beginSupportCheck(touchscreen))
+            perform(.beginSupportCheck(touchscreen, claim: claim))
             guard snapshot()?.touchscreens.first(where: { $0.id == touchscreen })?.mode == .released else {
                 // The model didn't let go: nothing is opened, and nothing it holds is touched.
-                perform(.endSupportCheck)
+                perform(.endSupportCheck(claim: claim))
                 startRefusal = Wording.supportLetGoRefused
                 return
             }
@@ -176,6 +214,10 @@ final class SupportCheckSession {
                 giveBack()
             } else if environment.ticks {
                 startTimer()
+            }
+            if isFinishing {
+                isFinishing = false
+                environment.finishing.ended(touchscreen: touchscreen, device: check.device.id)
             }
         }
     }
@@ -216,7 +258,14 @@ final class SupportCheckSession {
         }
         check?.stop(at: environment.now())
         environment.probe.stop()
-        if !isTaking { giveBack() }
+        if !isTaking {
+            giveBack()
+        } else if !isFinishing, let device {
+            // Closed during a read: the device is let go when the read returns. Until then a new
+            // check of it waits.
+            isFinishing = true
+            environment.finishing.began(touchscreen: touchscreen, device: device.id)
+        }
     }
 
     private func startTimer() {
@@ -240,7 +289,7 @@ final class SupportCheckSession {
     private func giveBack() {
         guard holdsTouchscreen else { return }
         holdsTouchscreen = false
-        perform(.endSupportCheck)
+        perform(.endSupportCheck(claim: claim))
     }
 
     // MARK: - The sheet

@@ -39,15 +39,26 @@ final class SupportCheckSessionTests: XCTestCase {
         func stopMatching() { calls.append("stopMatching") }
         func later(_ work: @escaping @MainActor () -> Void) { work() }
 
+        /// How many holders each interface has: it opens for one at a time, as a seized device does.
+        private var holders: [HIDInterfaceID: Int] = [:]
+
         func open(_ id: HIDInterfaceID, exclusive: Bool) -> IOReturn {
+            guard holders[id, default: 0] == 0 else {
+                calls.append("refused \(id)")
+                return IOReturn(bitPattern: 0xE000_02C5)  // kIOReturnExclusiveAccess
+            }
+            holders[id, default: 0] += 1
             calls.append("open \(id)")
             return kIOReturnSuccess
         }
 
         func close(_ id: HIDInterfaceID, exclusive: Bool) -> IOReturn {
+            holders[id] = max(0, holders[id, default: 0] - 1)
             calls.append("close \(id)")
             return kIOReturnSuccess
         }
+
+        var isHeld: Bool { holders.values.contains { $0 > 0 } }
 
         func hasInputMode(_ id: HIDInterfaceID) -> Bool { false }
 
@@ -84,27 +95,48 @@ final class SupportCheckSessionTests: XCTestCase {
         func send(_ bytes: [UInt8], on id: HIDInterfaceID, at time: TimeInterval) { handlers[id]?(bytes, time) }
     }
 
-    /// The model as the check sees it: the preview desk's snapshot, which lets go of a touchscreen
-    /// on `beginSupportCheck` (unless told not to) and takes it back on `endSupportCheck`.
+    /// The model as the check sees it: the preview desk's snapshot. As the real one, it lets go of
+    /// a touchscreen while any check's claim on it is held (unless told not to let go), and takes it
+    /// back when the last claim goes.
     @MainActor
     private final class FakeModel {
         var snapshot = PreviewModel(.desk).snapshot
         var letsGo = true
         private(set) var commands: [AppCommand] = []
-        /// Whether the device was closed when Tactile was told to take it back, each time.
+        private(set) var claims: [UUID: TouchscreenID] = [:]
+        /// Whether the device was free (no check holding it open) each time the model took it back.
         private(set) var deviceWasFreeAtEnd: [Bool] = []
         var isDeviceFree: () -> Bool = { true }
 
         func perform(_ command: AppCommand) {
             commands.append(command)
             switch command {
-            case .beginSupportCheck(let id) where letsGo:
+            case .beginSupportCheck(let id, let claim) where letsGo:
+                claims[claim] = id
                 set(id, mode: .released)
-            case .endSupportCheck:
+            case .endSupportCheck(let claim):
+                guard let id = claims.removeValue(forKey: claim), !claims.values.contains(id) else { return }
                 deviceWasFreeAtEnd.append(isDeviceFree())
-                set(UIFixtures.ilitek, mode: .driving)
+                set(id, mode: .driving)
             default:
                 break
+            }
+        }
+
+        /// The commands, with each claim named by the order it first appeared: "begin 1", "end 1".
+        var named: [String] {
+            var order: [UUID] = []
+            func number(_ claim: UUID) -> Int {
+                if let index = order.firstIndex(of: claim) { return index + 1 }
+                order.append(claim)
+                return order.count
+            }
+            return commands.compactMap { command in
+                switch command {
+                case .beginSupportCheck(_, let claim): return "begin \(number(claim))"
+                case .endSupportCheck(let claim): return "end \(number(claim))"
+                default: return nil
+                }
             }
         }
 
@@ -181,18 +213,19 @@ final class SupportCheckSessionTests: XCTestCase {
     }
 
     private func desk(sending: SupportSending, target: Bool = true, model given: FakeModel? = nil,
-                      transport: FakeTransport = FakeTransport()) throws -> Desk {
+                      transport: FakeTransport = FakeTransport(), system givenSystem: StandInHIDSystem? = nil,
+                      finishing givenFinishing: SupportChecksFinishing? = nil) throws -> Desk {
         let model = given ?? FakeModel()
-        let system = StandInHIDSystem(try ilitek())
+        let system = try givenSystem ?? StandInHIDSystem(try ilitek())
+        let finishing = givenFinishing ?? SupportChecksFinishing()
         let temporary = try folder()
         let book = DeviceLogBook()
         let environment = SupportSessionEnvironment(
             probe: SupportProbe(system: system, logBook: book), sending: sending, transport: transport, logBook: book,
             mac: { SupportMac(model: "Mac15,6", macOS: "26.1", tactileVersion: "0.7.0", tactileBuild: "512", displays: 2) },
-            now: { [unowned self] in self.clock }, ticks: false, temporary: temporary, home: "/Users/someone")
-        model.isDeviceFree = { [unowned system] in
-            system.calls.filter { $0 == "open \(Self.touchID)" }.count == system.calls.filter { $0 == "close \(Self.touchID)" }.count
-        }
+            now: { [unowned self] in self.clock }, ticks: false, temporary: temporary, home: "/Users/someone",
+            finishing: finishing)
+        model.isDeviceFree = { [unowned system] in !system.isHeld }
         let ilitek = try XCTUnwrap(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek })
         let session = SupportCheckSession(
             deviceID: target ? nil : "222a:0001@01141000", touchscreen: target ? SupportTarget(ilitek) : nil, name: ilitek.name,
@@ -236,16 +269,16 @@ final class SupportCheckSessionTests: XCTestCase {
         XCTAssertFalse(desk.system.calls.contains { $0.hasPrefix("open") }, "nothing opened before Start Check")
 
         await start(desk.session)
-        XCTAssertEqual(desk.model.commands, [.beginSupportCheck(UIFixtures.ilitek)])
+        XCTAssertEqual(desk.model.named, ["begin 1"])
         XCTAssertTrue(desk.system.calls.contains("open 21"))
         XCTAssertEqual(check.stage, .touching(.one))
 
         for _ in 0..<3 { desk.session.skip() }
         XCTAssertEqual(check.stage, .finished)
-        XCTAssertEqual(desk.model.commands, [.beginSupportCheck(UIFixtures.ilitek), .endSupportCheck])
+        XCTAssertEqual(desk.model.named, ["begin 1", "end 1"])
         XCTAssertEqual(desk.model.deviceWasFreeAtEnd, [true], "taken back only once the check had closed it")
         desk.session.stop()
-        XCTAssertEqual(desk.model.commands.filter { $0 == .endSupportCheck }.count, 1, "and only once")
+        XCTAssertEqual(desk.model.named.filter { $0.hasPrefix("end") }.count, 1, "and only once")
     }
 
     func testStartCheckWaitsWhileTactileCantLetGo() async throws {
@@ -269,9 +302,85 @@ final class SupportCheckSessionTests: XCTestCase {
         let refused = try desk(sending: .off, model: refusing)
         await start(refused.session)
         XCTAssertEqual(refused.session.startRefusal, "Tactile couldn’t let go of the touchscreen just now. Try again in a moment.")
-        XCTAssertEqual(refusing.commands, [.beginSupportCheck(UIFixtures.ilitek), .endSupportCheck])
+        XCTAssertEqual(refusing.named, ["begin 1", "end 1"])
         XCTAssertFalse(refused.system.calls.contains { $0.hasPrefix("open") }, "nothing it holds is touched")
         XCTAssertEqual(refused.session.check?.stage, .ready)
+    }
+
+    // MARK: - Overlapping checks (R-1)
+
+    /// The review's sequence: check A is closed while a slow read holds the device, and the person
+    /// opens the check again. Check B can't start until A has let go, and says why; once A's read
+    /// returns, A lets go and hands back, the model takes the touchscreen again, and B can start.
+    func testANewCheckWaitsUntilTheLastOneHasLetGo() async throws {
+        let system = StandInHIDSystem(try ilitek())
+        let model = FakeModel()
+        let finishing = SupportChecksFinishing()
+        let a = try desk(sending: .off, model: model, system: system, finishing: finishing)
+        system.holdsReads = true
+        a.session.start()
+        await waitUntil { system.readsHeld == 1 }
+        a.session.stop()
+        XCTAssertTrue(finishing.isFinishing(UIFixtures.ilitek))
+
+        let b = try desk(sending: .off, model: model, system: system, finishing: finishing)
+        XCTAssertEqual(b.session.startAvailability, .lastCheckFinishing)
+        XCTAssertEqual(Wording.supportUnavailable(.lastCheckFinishing), "The last check is still finishing. Try again in a moment.")
+        b.session.start()
+        XCTAssertEqual(b.session.startRefusal, "The last check is still finishing. Try again in a moment.")
+        XCTAssertEqual(model.named, ["begin 1"], "B asks nothing of the model")
+        XCTAssertFalse(system.calls.contains("refused 21"), "B never tries the device A holds")
+
+        system.letReadsGo()
+        await a.session.starting?.value
+        XCTAssertEqual(model.named, ["begin 1", "end 1"])
+        XCTAssertEqual(model.deviceWasFreeAtEnd, [true], "taken back once A had closed it")
+        XCTAssertEqual(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek }?.mode, .driving)
+        XCTAssertFalse(finishing.isFinishing(UIFixtures.ilitek), "clears by itself")
+        XCTAssertEqual(b.session.startAvailability, .available)
+
+        system.holdsReads = false
+        await start(b.session)
+        for _ in 0..<3 { b.session.skip() }
+        XCTAssertNil(b.session.check?.interruption, "B ran its course")
+        XCTAssertEqual(model.named, ["begin 1", "end 1", "begin 2", "end 2"])
+        XCTAssertEqual(model.deviceWasFreeAtEnd, [true, true])
+        XCTAssertEqual(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek }?.mode, .driving)
+    }
+
+    /// The same sequence with nothing to stop B starting (as before the guard): B can't open what A
+    /// holds and hands back, but its hand-back clears only its own claim. When A's read returns and A
+    /// hands back, the model takes the touchscreen again: it is never left undriven.
+    func testAHandBackClearsOnlyItsOwnClaim() async throws {
+        let system = StandInHIDSystem(try ilitek())
+        let model = FakeModel()
+        let a = try desk(sending: .off, model: model, system: system)
+        system.holdsReads = true
+        a.session.start()
+        await waitUntil { system.readsHeld == 1 }
+        a.session.stop()
+
+        let b = try desk(sending: .off, model: model, system: system)  // a registry of its own: nothing stops it
+        await start(b.session)
+        XCTAssertEqual(b.session.check?.interruption, .couldNotOpen, "A still holds the device")
+        XCTAssertEqual(model.named, ["begin 1", "begin 2", "end 2"])
+        XCTAssertEqual(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek }?.mode, .released, "A still holds it")
+
+        system.letReadsGo()
+        await a.session.starting?.value
+        XCTAssertEqual(model.named, ["begin 1", "begin 2", "end 2", "end 1"])
+        XCTAssertEqual(model.deviceWasFreeAtEnd, [true], "taken back once, when the device was free")
+        XCTAssertEqual(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek }?.mode, .driving, "never left undriven")
+    }
+
+    /// The pane's and the menu's Help Me Support say the same while a check is still letting go.
+    func testTheEntriesWaitWhileALastCheckIsFinishing() throws {
+        let snapshot = PreviewModel(.desk).snapshot
+        let ilitek = try XCTUnwrap(snapshot.touchscreens.first { $0.id == UIFixtures.ilitek })
+        XCTAssertEqual(SupportCheckAvailability.of(ilitek, in: snapshot, finishing: true), .lastCheckFinishing)
+        XCTAssertEqual(SupportCheckAvailability.available.whileFinishing(true), .lastCheckFinishing)
+        XCTAssertEqual(SupportCheckAvailability.setUpRunning.whileFinishing(true), .setUpRunning)
+        XCTAssertEqual(SupportCheckAvailability.available.whileFinishing(false), .available)
     }
 
     /// A touchscreen Tactile holds shared is checked like any other, once the model has let go, and
@@ -286,7 +395,7 @@ final class SupportCheckSessionTests: XCTestCase {
         XCTAssertTrue(desk.session.macOSMayActToo, "step 1 says so")
         await start(desk.session)
         XCTAssertNil(desk.session.startRefusal)
-        XCTAssertEqual(shared.commands, [.beginSupportCheck(UIFixtures.ilitek)], "the model lets go first")
+        XCTAssertEqual(shared.named, ["begin 1"], "the model lets go first")
         XCTAssertTrue(desk.system.calls.contains("open 21"))
 
         let plain = try self.desk(sending: .off)
@@ -302,13 +411,13 @@ final class SupportCheckSessionTests: XCTestCase {
         await waitUntil { desk.system.readsHeld == 1 }
         XCTAssertEqual(desk.session.check?.stage, .taking)
         desk.session.stop()
-        XCTAssertEqual(desk.model.commands, [.beginSupportCheck(UIFixtures.ilitek)], "not yet: the read holds the device")
+        XCTAssertEqual(desk.model.named, ["begin 1"], "not yet: the read holds the device")
         XCTAssertFalse(desk.system.calls.contains { $0.hasPrefix("close") || $0 == "stopMatching" },
                        "nothing closed under the read in flight")
         desk.system.letReadsGo()
         await desk.session.starting?.value
         XCTAssertEqual(desk.system.calls.last, "stopMatching", "closed, then unmatched, once the read returned")
-        XCTAssertEqual(desk.model.commands, [.beginSupportCheck(UIFixtures.ilitek), .endSupportCheck])
+        XCTAssertEqual(desk.model.named, ["begin 1", "end 1"])
         XCTAssertEqual(desk.model.deviceWasFreeAtEnd, [true])
         XCTAssertFalse(desk.system.calls.contains { $0.hasPrefix("write") }, "nothing written after a read that was cut short")
         XCTAssertEqual(desk.session.check?.interruption, .stopped)
@@ -329,7 +438,7 @@ final class SupportCheckSessionTests: XCTestCase {
         let environment = SupportSessionEnvironment(
             probe: SupportProbe(system: StandInHIDSystem([]), logBook: book), sending: .off, transport: FakeTransport(),
             logBook: book, mac: { SupportMac(model: "M", macOS: "26.1", tactileVersion: "0.7.0", tactileBuild: "1", displays: 1) },
-            now: { 0 }, ticks: false, temporary: try folder(), home: "/")
+            now: { 0 }, ticks: false, temporary: try folder(), home: "/", finishing: SupportChecksFinishing())
         let session = SupportCheckSession(deviceID: "1234:5678@01200000", touchscreen: nil, name: "Gone\u{202E}", perform: { _ in },
                                           snapshot: { nil }, environment: environment)
         XCTAssertNil(session.check)

@@ -34,7 +34,8 @@ struct SupportSection: View {
     var perform: PerformCommand
 
     var body: some View {
-        let availability = SupportCheckAvailability.of(touchscreen, in: snapshot)
+        let availability = SupportCheckAvailability.of(
+            touchscreen, in: snapshot, finishing: SupportChecksFinishing.shared.isFinishing(touchscreen.id))
         Section {
             LabeledContent {
                 Button(Wording.helpMeSupport) { SupportCheckWindow.open(SupportTarget(touchscreen), perform: perform) }

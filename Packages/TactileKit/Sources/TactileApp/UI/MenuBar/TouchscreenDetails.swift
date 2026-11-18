@@ -144,7 +144,8 @@ struct TouchscreenDetailsView: View {
                 }
             }
 
-            if let support = details.support, let target = details.supportTarget {
+            if let support = details.support?.whileFinishing(SupportChecksFinishing.shared.isFinishing(details.id)),
+               let target = details.supportTarget {
                 PanelSeparator()
                 PanelRowButton(title: Wording.helpMeSupport, isEnabled: support == .available) {
                     actions.closeMenu()
@@ -240,7 +241,8 @@ struct TouchscreenDetailsMenu: View {
                 }
             }
         }
-        if let support = details.support, let target = details.supportTarget {
+        if let support = details.support?.whileFinishing(SupportChecksFinishing.shared.isFinishing(details.id)),
+           let target = details.supportTarget {
             Divider()
             Button(Wording.helpMeSupport) { SupportCheckWindow.open(target, perform: perform) }
                 .disabled(support != .available)

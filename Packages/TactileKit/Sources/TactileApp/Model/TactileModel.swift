@@ -260,17 +260,20 @@ public final class TactileModel: AppModel, TouchscreenSourceDelegate {
             return
         case .openGestureTester, .closeGestureTester, .setGestureTesterPerformsSwipes, .clearGestureTester:
             performGestureTester(command)
-        case .beginSupportCheck(let id):
+        case .beginSupportCheck(let id, let claim):
             guard inputs.setUp == nil, setUp == nil, setUpMode == nil else {
                 ModelLog.model.info("The touchscreen check of \(Self.usbAndLocation(id, self.inputs), privacy: .public) can't begin while a set-up runs")
                 return
             }
-            ModelLog.model.info("The touchscreen check has \(Self.usbAndLocation(id, self.inputs), privacy: .public): letting it go until the check ends")
-            inputs.supportCheck = id
-        case .endSupportCheck:
-            guard let id = inputs.supportCheck else { return }
-            ModelLog.model.info("The touchscreen check let \(Self.usbAndLocation(id, self.inputs), privacy: .public) go: taking it back")
-            inputs.supportCheck = nil
+            ModelLog.model.info("A touchscreen check has \(Self.usbAndLocation(id, self.inputs), privacy: .public): letting it go until the check ends")
+            inputs.supportChecks[claim] = id
+        case .endSupportCheck(let claim):
+            guard let id = inputs.supportChecks.removeValue(forKey: claim) else {
+                ModelLog.model.info("A touchscreen check's claim was given back that isn't held: nothing changes")
+                return
+            }
+            let stillHeld = inputs.supportChecks.values.contains(id)
+            ModelLog.model.info("A touchscreen check let \(Self.usbAndLocation(id, self.inputs), privacy: .public) go: \(stillHeld ? "another check still holds it" : "taking it back", privacy: .public)")
         default:
             break
         }

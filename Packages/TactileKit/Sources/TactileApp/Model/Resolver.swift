@@ -49,8 +49,9 @@ public struct AppInputs: Equatable, Sendable {
     public var canFollowSwipes: Bool
     /// Whether Tactile opens at login, as the system says.
     public var launchAtLogin: LaunchAtLogin
-    /// The touchscreen the touchscreen check has now, which Tactile lets go of; nil when none.
-    public var supportCheck: TouchscreenID?
+    /// The touchscreen checks' claims, each on one touchscreen: Tactile lets go of a touchscreen
+    /// while any claim on it is held (see `AppCommand.beginSupportCheck`).
+    public var supportChecks: [UUID: TouchscreenID]
 
     public init(
         appVersion: String, settings: TactileSettings, connected: [ConnectedTouchscreen],
@@ -58,7 +59,7 @@ public struct AppInputs: Equatable, Sendable {
         hasAccessibilityAccess: Bool, isSessionActive: Bool, isAsleep: Bool, isTouchUpRunning: Bool,
         areMissionControlShortcutsOn: Bool, settingsWereSetAside: Bool, isQuitting: Bool, setUp: SetUpSnapshot? = nil,
         lastKnownDisplays: [DisplayFacts]? = nil, canFollowSwipes: Bool = false, launchAtLogin: LaunchAtLogin = .unavailable,
-        setUpMode: SetUpModeSnapshot? = nil, supportCheck: TouchscreenID? = nil
+        setUpMode: SetUpModeSnapshot? = nil, supportChecks: [UUID: TouchscreenID] = [:]
     ) {
         self.appVersion = appVersion
         self.settings = settings
@@ -78,7 +79,7 @@ public struct AppInputs: Equatable, Sendable {
         self.lastKnownDisplays = lastKnownDisplays
         self.canFollowSwipes = canFollowSwipes
         self.launchAtLogin = launchAtLogin
-        self.supportCheck = supportCheck
+        self.supportChecks = supportChecks
     }
 }
 
@@ -177,7 +178,7 @@ public struct Resolution: Equatable, Sendable {
 /// | 3 | No Accessibility access | released | released | `accessibilityMissing` |
 /// | 4 | The session is not active | released | released | as it would otherwise be |
 /// | 4a | The Mac is going to sleep or asleep | released | released | as it would otherwise be |
-/// | 4b | The touchscreen check has it (`supportCheck`) | released | released | as it would otherwise be |
+/// | 4b | A touchscreen check holds a claim on it (`supportChecks`) | released | released | as it would otherwise be |
 /// | 4c | No record: it can't be told apart from another connected touchscreen | held | taken | `notSetUp` |
 /// | 4d | A set-up is running for it, or set-up mode is on, and it can run one (see `canRunSetUp`) | settingUp | taken | as it would otherwise be |
 /// | 4e | Set-up mode is on, and it can't run a set-up | held | taken | as it would otherwise be |
@@ -473,7 +474,7 @@ public enum Resolver {
             return id
         case .setOneFinger(let id, _), .setPointerReturn(let id, _), .setShowsCircles(let id, _), .setGestures(let id, _),
              .setRejection(let id, _), .copyBehaviour(_, let id), .resetBehaviour(let id), .clearCalibration(let id),
-             .beginSetUp(let id, _), .declineSetUp(let id), .openGestureTester(let id), .beginSupportCheck(let id):
+             .beginSetUp(let id, _), .declineSetUp(let id), .openGestureTester(let id), .beginSupportCheck(let id, _):
             return id
         case .setOn, .renameDisplay, .setDebugLogging, .askForAccessibility, .setUpConfirmSize, .setUpRedo, .setUpDone,
              .cancelSetUp, .setRecordsFrames, .copyDiagnostics, .setSwipesFollowFingers, .setLaunchAtLogin,
@@ -724,7 +725,7 @@ private struct World {
         if !inputs.hasAccessibilityAccess { return released(.noAccessibility) }
         if !inputs.isSessionActive { return released(.sessionNotActive) }
         if inputs.isAsleep { return released(.asleep) }
-        if inputs.supportCheck == screen.id { return released(.supportCheck) }
+        if inputs.supportChecks.values.contains(screen.id) { return released(.supportCheck) }
         if !screen.hasRecord { return held(.noRecord) }
         if inputs.setUp?.touchscreen == screen.id || inputs.setUpMode != nil, canRunSetUp(screen) {
             // Taken, its touches for the flow or the mode: never a pipeline, never the pointer.
@@ -768,7 +769,7 @@ private struct World {
         }
         if device.status.touchOrigin == .unreadable { return false }
         if macOSAlsoHandles(screen) { return false }
-        if inputs.supportCheck == screen.id { return false }
+        if inputs.supportChecks.values.contains(screen.id) { return false }
         return true
     }
 
