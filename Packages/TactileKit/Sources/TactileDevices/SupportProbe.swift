@@ -120,7 +120,9 @@ public struct SupportRawReport: Equatable, Sendable {
 ///   vendor interface included.
 /// - **The reads run off the main thread** (`HIDSystem.readFeatureReportInBackground`), so a panel
 ///   slow to answer never freezes the window. After each one the take goes on only if it is still
-///   the one under way: a release asked for meanwhile closes what is open, and nothing more is done.
+///   the one under way: a release or a stop asked for meanwhile is carried out then (what is open
+///   closed, then the matching stopped), and nothing more is done. No device is ever closed under a
+///   read still in flight.
 /// - **A device with no touch interface** (mouse-only, or a digitiser Tactile can't tell about) has
 ///   its listened interfaces opened (exclusively, or shared) and listened to. Nothing is read from
 ///   it and nothing written.
@@ -149,6 +151,9 @@ public final class SupportProbe {
     private var interfaces: [HIDInterfaceID: KnownInterface] = [:]
     private var arrivals = 0
     private var taken: Taken?
+    /// `stop()` came while a read was under way: it is finished when the read returns, so no device
+    /// is closed, nor the matching stopped, under a request still in flight.
+    private var stopAfterRead = false
 
     /// The device taken now.
     private final class Taken {
@@ -200,10 +205,22 @@ public final class SupportProbe {
         isStarting = false
     }
 
-    /// Lets go of the device taken, if any, stops listing, and forgets every device.
+    /// Lets go of the device taken, if any, stops listing, and forgets every device. During a read it
+    /// returns at once, and all of it is done when the read returns (within the HID request timeout,
+    /// about 5 s): nothing blocks meanwhile.
     public func stop() {
         guard isStarted else { return }
+        if let taken, taken.isReading {
+            taken.releaseAfterRead = true
+            stopAfterRead = true
+            return
+        }
         release()
+        finishStopping()
+    }
+
+    private func finishStopping() {
+        stopAfterRead = false
         isStarted = false
         interfaces = [:]
         system.stopMatching()
@@ -290,6 +307,7 @@ public final class SupportProbe {
             // written yet: the reads come before the write.
             if self.taken === taken { self.taken = nil }
             _ = close(taken, writingBack: true)
+            if stopAfterRead { finishStopping() }
             return false
         }
         return isStarted && self.taken === taken

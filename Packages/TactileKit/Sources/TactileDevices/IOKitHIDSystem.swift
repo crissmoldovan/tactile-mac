@@ -168,16 +168,22 @@ final class IOKitHIDSystem: HIDSystem {
         return Self.getReport(device, reportID: reportID, length: length)
     }
 
-    /// The same call on a background thread, as hidapi makes it while the device is scheduled on
-    /// another thread's run loop. The device is kept alive by the box until the call returns; if the
-    /// interface is closed or unplugged meanwhile, IOKit answers with an error.
+    /// Where background reads block: a serial queue of their own, never Swift's cooperative pool,
+    /// which a call that waits up to the HID request timeout must not hold.
+    nonisolated private static let readQueue = DispatchQueue(label: "com.crissmoldovan.tactile.feature-reads", qos: .userInitiated)
+
+    /// The same call on its own serial queue, as hidapi makes it while the device is scheduled on
+    /// another thread's run loop. The device is kept alive by the box until the call returns. The
+    /// check closes nothing while one is in flight (`SupportProbe`).
     func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
         guard let device = devices[id] else { return FeatureReportRead(result: IOResult.noDevice, length: 0, seconds: 0) }
         guard length > 0 else { return FeatureReportRead(result: IOResult.badArgument, length: 0, seconds: 0) }
         let box = DeviceBox(device: device)
-        return await Task.detached(priority: .userInitiated) {
-            Self.getReport(box.device, reportID: reportID, length: length)
-        }.value
+        return await withCheckedContinuation { continuation in
+            Self.readQueue.async {
+                continuation.resume(returning: Self.getReport(box.device, reportID: reportID, length: length))
+            }
+        }
     }
 
     nonisolated private static func getReport(_ device: IOHIDDevice, reportID: Int, length: Int) -> FeatureReportRead {

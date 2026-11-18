@@ -288,8 +288,11 @@ final class SupportCheckSessionTests: XCTestCase {
         XCTAssertEqual(desk.session.check?.stage, .taking)
         desk.session.stop()
         XCTAssertEqual(desk.model.commands, [.beginSupportCheck(UIFixtures.ilitek)], "not yet: the read holds the device")
+        XCTAssertFalse(desk.system.calls.contains { $0.hasPrefix("close") || $0 == "stopMatching" },
+                       "nothing closed under the read in flight")
         desk.system.letReadsGo()
         await desk.session.starting?.value
+        XCTAssertEqual(desk.system.calls.last, "stopMatching", "closed, then unmatched, once the read returned")
         XCTAssertEqual(desk.model.commands, [.beginSupportCheck(UIFixtures.ilitek), .endSupportCheck])
         XCTAssertEqual(desk.model.deviceWasFreeAtEnd, [true])
         XCTAssertFalse(desk.system.calls.contains { $0.hasPrefix("write") }, "nothing written after a read that was cut short")

@@ -344,4 +344,29 @@ final class SupportProbeTests: XCTestCase {
         XCTAssertEqual(lines.last, "Support check: let go")
         XCTAssertFalse(lines.joined().contains(SupportDesk.stripSerial))
     }
+
+    /// Stopped (the window closing, sleep, quitting) while a read is under way: nothing is closed and
+    /// the system doesn't stop matching until the read has returned, so no device is closed under a
+    /// request still in flight.
+    func testStoppingDuringAReadWaitsForIt() async throws {
+        let (system, probe) = make(try SupportDesk.all())
+        system.suspendsReads = true
+        probe.start()
+        let device = try device(probe, "27c0:0859")
+        let taking = Task { @MainActor in await probe.take(device, onReport: { _ in }, onGone: { _ in }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        system.clearCalls()
+        probe.stop()
+        XCTAssertEqual(system.calls, [], "neither closed nor unmatched while the read is in flight")
+        system.resumeReads()
+        let switches = await taking.value
+        XCTAssertNil(switches)
+        XCTAssertEqual(system.calls.last, .stopMatching, "stopped once the read returned")
+        let stop = try XCTUnwrap(system.calls.firstIndex(of: .stopMatching))
+        let closes = system.calls.indices.filter { if case .close = system.calls[$0] { return true } else { return false } }
+        XCTAssertEqual(closes.count, 2)
+        XCTAssertTrue(closes.allSatisfy { $0 < stop }, "closed first, then unmatched")
+        XCTAssertFalse(system.calls.contains { if case .writeInputMode = $0 { return true } else { return false } })
+        XCTAssertEqual(probe.devices, [], "and it lists nothing more")
+    }
 }
