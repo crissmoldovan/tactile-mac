@@ -146,8 +146,13 @@ struct SupportSendSheet: View {
                     .disabled(session.archive == nil)
             }
             Spacer()
-            Button(session.sendStage == .sent ? Wording.supportDone : content.showsForm ? Wording.cancel : Wording.close) { dismiss() }
-                .keyboardShortcut(.cancelAction)
+            if content.stopsSending {
+                Button(Wording.stopSending) { session.cancelSending() }
+                    .keyboardShortcut(.cancelAction)
+            } else {
+                Button(session.sendStage == .sent ? Wording.supportDone : content.showsForm ? Wording.cancel : Wording.close) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
             if content.showsSend {
                 Button(Wording.send) { session.send() }
                     .keyboardShortcut(.defaultAction)

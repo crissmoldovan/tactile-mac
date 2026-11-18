@@ -67,13 +67,27 @@ struct SupportCheckView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                HStack {
+                let availability = session.startAvailability
+                HStack(alignment: .firstTextBaseline) {
+                    if let reason = availability == .available ? session.startRefusal : Wording.supportUnavailable(availability) {
+                        Label(reason, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Spacer()
                     Button(Wording.startCheck) { session.start() }
                         .keyboardShortcut(.defaultAction)
                         .controlSize(.large)
+                        .disabled(availability != .available)
                 }
             }
+        case .taking:
+            VStack(spacing: 12) {
+                ProgressView()
+                Text(Wording.readingTouchscreen)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .touching(let fingers):
             SupportTouchArea(session: session, check: check, fingers: fingers, revision: session.revision)
         case .finished:
@@ -89,7 +103,7 @@ struct SupportStepList: View {
     var revision: Int
 
     var body: some View {
-        let marks = SupportStepMarks(stage: check.stage, steps: check.steps).marks
+        let marks = SupportStepMarks(stage: check.stage, steps: check.steps, interrupted: check.wasInterrupted).marks
         VStack(alignment: .leading, spacing: 16) {
             ForEach(0..<4, id: \.self) { index in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -184,8 +198,41 @@ struct SupportVerdictView: View {
     var revision: Int
 
     var body: some View {
-        let verdict = check.verdict
+        if let interruption = check.interruption {
+            interrupted(interruption)
+        } else {
+            finished
+        }
+    }
+
+    /// A check that didn't run its course: no verdict, nothing to send.
+    private func interrupted(_ interruption: SupportCheck.Interruption) -> some View {
         VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.arrow.circlepath")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.orange)
+                Text(Wording.interruptedTitle)
+                    .font(.title.weight(.semibold))
+            }
+            Text(Wording.supportInterruption(interruption))
+                .fixedSize(horizontal: false, vertical: true)
+            Text(Wording.tryAgain)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            HStack {
+                Spacer()
+                Button(Wording.supportDone) { session.close() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .controlSize(.large)
+        }
+    }
+
+    private var finished: some View {
+        let verdict = check.verdict
+        return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 Image(systemName: symbol(verdict))
                     .font(.system(size: 34))
@@ -193,13 +240,8 @@ struct SupportVerdictView: View {
                 Text(Wording.verdictTitle(verdict))
                     .font(.title.weight(.semibold))
             }
-            if let interruption = check.interruption.flatMap(Wording.supportInterruption) {
-                Text(interruption)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text(Wording.verdictSentence(check.verdictReason))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(Wording.verdictSentence(check.verdictReason))
+                .fixedSize(horizontal: false, vertical: true)
             if verdict == .worksFully {
                 Text(Wording.worksFullyThanks)
                     .foregroundStyle(.secondary)

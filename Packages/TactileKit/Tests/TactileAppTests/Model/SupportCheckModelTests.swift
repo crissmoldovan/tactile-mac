@@ -24,6 +24,7 @@ final class SupportCheckModelTests: XCTestCase {
         let harness = try deskHarness()
         XCTAssertEqual(harness.source.state(of: Desk.ilitekHandle), .taken)
         let saves = harness.model.saves
+        let before = harness.touchscreen(Desk.ilitekID)
 
         harness.model.perform(.beginSupportCheck(Desk.ilitekID))
         XCTAssertEqual(harness.source.state(of: Desk.ilitekHandle), .released, "let go before the check takes it")
@@ -35,6 +36,8 @@ final class SupportCheckModelTests: XCTestCase {
         XCTAssertEqual(harness.source.state(of: Desk.ilitekHandle), .taken, "taken back")
         XCTAssertEqual(harness.touchscreen(Desk.ilitekID)?.mode, .driving)
         XCTAssertEqual(harness.model.saves, saves, "nothing about a check is saved")
+        XCTAssertEqual(harness.touchscreen(Desk.ilitekID), before,
+                       "exactly as it was: driving, its input mode, its touches' origin and its exclusive access")
     }
 
     func testACheckDoesntBeginWhileASetUpRuns() throws {

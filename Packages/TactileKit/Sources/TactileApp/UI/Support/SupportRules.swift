@@ -15,14 +15,18 @@ enum SupportLinks {
 enum SupportCheckAvailability: Equatable, Sendable {
     case available
     case notConnected
-    /// A set-up has the touchscreens: the check would take one from under it.
+    /// A set-up has the touchscreens: the model won't let go of one.
     case setUpRunning
+    /// Tactile holds it shared: something else holds it exclusively, so the check couldn't take it
+    /// as Tactile does, and the other program would act on every touch too.
+    case heldShared
 
     /// Any connected touchscreen, whatever Tactile makes of it (one it can't use is just the kind to
-    /// check), unless a set-up runs.
+    /// check), unless a set-up runs or Tactile could only hold it shared.
     static func of(_ touchscreen: TouchscreenSnapshot, in snapshot: AppSnapshot) -> SupportCheckAvailability {
         guard touchscreen.isConnected else { return .notConnected }
         if snapshot.setUp != nil || snapshot.setUpMode != nil { return .setUpRunning }
+        if touchscreen.notes.contains(.macOSMayAlsoRespond) { return .heldShared }
         return .available
     }
 }
@@ -61,14 +65,19 @@ enum SupportStepMark: Equatable, Sendable {
 struct SupportStepMarks: Equatable {
     var marks: [SupportStepMark]
 
-    init(stage: SupportCheck.Stage, steps: [SupportTouchStep]) {
+    init(stage: SupportCheck.Stage, steps: [SupportTouchStep], interrupted: Bool = false) {
         switch stage {
         case .ready:
             marks = [.current, .pending, .pending, .pending]
+        case .taking:
+            marks = [.done, .current, .pending, .pending]
         case .touching:
             marks = [.done, .done, .current, .pending]
+        case .finished where interrupted:
+            // No verdict for a check that didn't run its course.
+            marks = [.done, steps.isEmpty ? .skipped : .done, .skipped, .skipped]
         case .finished:
-            marks = steps.isEmpty ? [.done, .skipped, .skipped, .done] : [.done, .done, .done, .done]
+            marks = [.done, .done, .done, .done]
         }
     }
 }
@@ -99,11 +108,14 @@ struct SupportSendForm: Equatable {
 enum SupportSendStage: Equatable, Sendable {
     /// Not the official build: it only saves the report.
     case off
-    /// Asking the site whether it takes reports.
-    case checking
-    /// The site takes reports: the email and note, and Send.
+    /// The official build: the email and note, and Send.
     case ready
+    /// Asking the site whether it takes reports, then uploading.
     case sending
+    /// Sending was stopped before the upload began: nothing was sent.
+    case notSent
+    /// Sending was stopped during the upload: the report may already have reached the site.
+    case mayHaveBeenSent
     case sent
     /// The site refused it, with this reason. The person can fix the email and send again.
     case refused(String)
@@ -124,19 +136,24 @@ struct SupportSendSheetContent: Equatable {
     /// A line about where sending stands, when there is one.
     var message: String?
     var showsGitHub: Bool
+    /// Its cancel button stops the sending under way (Stop Sending), rather than closing the sheet.
+    var stopsSending = false
 
     init(stage: SupportSendStage, form: SupportSendForm, saved: Bool) {
         switch stage {
         case .off:
             self.init(form: false, send: false, message: Wording.sendingOff, gitHub: true)
-        case .checking:
-            self.init(form: false, send: false, message: Wording.checkingSending, gitHub: saved)
         case .ready:
             self.init(form: true, send: true, message: nil, gitHub: saved)
         case .sending:
             self.init(form: true, send: true, message: Wording.sending, gitHub: saved)
             formIsEnabled = false
             sendEnabled = false
+            stopsSending = true
+        case .notSent:
+            self.init(form: true, send: true, message: Wording.sendingNotSent, gitHub: saved)
+        case .mayHaveBeenSent:
+            self.init(form: false, send: false, message: Wording.sendingMayHaveBeenSent, gitHub: saved)
         case .sent:
             self.init(form: false, send: false, message: Wording.reportSent, gitHub: false)
             showsSaveReport = false

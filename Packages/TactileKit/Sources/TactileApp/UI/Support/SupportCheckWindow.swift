@@ -17,6 +17,9 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
 
     private var window: GestureTesterNSWindow?
     private var session: SupportCheckSession?
+    /// The app's model: what the check tells to let go and take back, and whose snapshot says whether
+    /// it can. Set once, as the app starts.
+    private var model: (any AppModel)?
     private var isClosingByItself = false
     private var observers: [NSObjectProtocol] = []
 
@@ -34,11 +37,18 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
         })
     }
 
+    /// The app's model, once: the check asks it to let go of a touchscreen and to take it back.
+    static func startForTheApp(_ model: any AppModel) {
+        shared.model = model
+    }
+
     /// Help Me Support This Touchscreen…, for a touchscreen Tactile lists.
     static func open(_ touchscreen: SupportTarget, perform: @escaping PerformCommand) {
-        InterfaceLog.log.info("touchscreen check: Help Me Support This Touchscreen… pressed for \(touchscreen.id.rawValue, privacy: .public)")
-        shared.open(SupportCheckSession(deviceID: nil, touchscreen: touchscreen, name: touchscreen.name, perform: perform,
-                                        environment: .live()),
+        InterfaceLog.log.info("touchscreen check: Help Me Support This Touchscreen… pressed for \(touchscreen.usbID, privacy: .public)")
+        let model = shared.model
+        shared.open(SupportCheckSession(deviceID: nil, touchscreen: touchscreen, name: touchscreen.name,
+                                        perform: model.map { model in { model.perform($0) } } ?? perform,
+                                        snapshot: { model?.snapshot }, environment: .live()),
                     display: touchscreen.pairedDisplayID)
     }
 
@@ -46,7 +56,7 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
     static func open(_ device: SupportDevice, perform: @escaping PerformCommand) {
         InterfaceLog.log.info("touchscreen check: Check… pressed for \(device.usbID, privacy: .public)")
         shared.open(SupportCheckSession(deviceID: device.id, touchscreen: nil, name: Wording.supportDeviceName(device),
-                                        perform: perform, environment: .live()),
+                                        perform: perform, snapshot: { nil }, environment: .live()),
                     display: nil)
     }
 
@@ -109,6 +119,13 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
 
     private func forget() {
         session?.stop()
+        if session?.closedWhileSending == .mayHaveBeenSent {
+            // The window has gone: the person still hears that the report may have reached the site.
+            let alert = NSAlert()
+            alert.messageText = Wording.sendingMayHaveBeenSent
+            alert.alertStyle = .informational
+            alert.runModal()
+        }
         session = nil
         window = nil
         if RegularAppHold.release(.supportCheck) {

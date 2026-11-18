@@ -11,17 +11,21 @@ import TactileUpdates
 import XCTest
 
 /// The check's session, as its window runs it, with a stand-in HID system holding the surveyed
-/// ILITEK's interfaces, a fake transport and log entries made here: the model is told to let go and
-/// to take back, the report is made, the site is asked, and the answer shown. No device, no window,
-/// no network, and the temporary folder is removed.
+/// ILITEK's interfaces, a fake model, a fake transport and a log book of its own: Start Check waits
+/// while Tactile can't let go; the model is told to let go and to take back, only once the device is
+/// free; an interrupted check has no report; the site is asked only at Send; and sending can be
+/// stopped. No device, no window, no network, and the temporary folder is removed.
 @MainActor
 final class SupportCheckSessionTests: XCTestCase {
 
-    /// A HID system with the ILITEK behind it, answering every call with success.
+    /// A HID system with the ILITEK behind it, answering every call with success. Its reads can be
+    /// held, as a panel slow to answer would hold them.
     private final class StandInHIDSystem: HIDSystem {
         var connected: [HIDInterfaceDescription]
         private(set) var calls: [String] = []
         private var handlers: [HIDInterfaceID: @MainActor ([UInt8], TimeInterval) -> Void] = [:]
+        var holdsReads = false
+        private var heldReads: [CheckedContinuation<Void, Never>] = []
 
         init(_ connected: [HIDInterfaceDescription]) {
             self.connected = connected
@@ -53,6 +57,19 @@ final class SupportCheckSessionTests: XCTestCase {
                                      bytes: [UInt8(reportID), 10] + [UInt8](repeating: 0, count: max(0, length - 2)))
         }
 
+        func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
+            if holdsReads { await withCheckedContinuation { heldReads.append($0) } }
+            return readFeatureReport(id, reportID: reportID, length: length)
+        }
+
+        var readsHeld: Int { heldReads.count }
+
+        func letReadsGo() {
+            let held = heldReads
+            heldReads = []
+            for read in held { read.resume() }
+        }
+
         func writeInputMode(_ id: HIDInterfaceID, _ value: Int) -> IOReturn {
             calls.append("write \(value)")
             return kIOReturnSuccess
@@ -67,15 +84,62 @@ final class SupportCheckSessionTests: XCTestCase {
         func send(_ bytes: [UInt8], on id: HIDInterfaceID, at time: TimeInterval) { handlers[id]?(bytes, time) }
     }
 
-    /// Answers the status and the upload as told.
+    /// The model as the check sees it: the preview desk's snapshot, which lets go of a touchscreen
+    /// on `beginSupportCheck` (unless told not to) and takes it back on `endSupportCheck`.
+    @MainActor
+    private final class FakeModel {
+        var snapshot = PreviewModel(.desk).snapshot
+        var letsGo = true
+        private(set) var commands: [AppCommand] = []
+        /// Whether the device was closed when Tactile was told to take it back, each time.
+        private(set) var deviceWasFreeAtEnd: [Bool] = []
+        var isDeviceFree: () -> Bool = { true }
+
+        func perform(_ command: AppCommand) {
+            commands.append(command)
+            switch command {
+            case .beginSupportCheck(let id) where letsGo:
+                set(id, mode: .released)
+            case .endSupportCheck:
+                deviceWasFreeAtEnd.append(isDeviceFree())
+                set(UIFixtures.ilitek, mode: .driving)
+            default:
+                break
+            }
+        }
+
+        private func set(_ id: TouchscreenID, mode: TouchscreenMode) {
+            guard let index = snapshot.touchscreens.firstIndex(where: { $0.id == id }) else { return }
+            snapshot.touchscreens[index].mode = mode
+        }
+    }
+
+    /// Answers the status and the upload as told, and can hold either until it is cancelled.
     private final class FakeTransport: SupportTransport, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _methods: [String] = []
+        private var _cancelled: [String] = []
         var available = true
         var uploadStatus = 202
-        private(set) var methods: [String] = []
+        var holdsStatus = false
+        var holdsUpload = false
+
+        var methods: [String] { lock.withLock { _methods } }
+        var cancelled: [String] { lock.withLock { _cancelled } }
 
         func perform(_ request: URLRequest) async throws -> (Data, HTTPResult) {
-            methods.append(request.httpMethod ?? "GET")
-            if request.url?.path == SupportUploader.statusPath {
+            let method = request.httpMethod ?? "GET"
+            lock.withLock { _methods.append(method) }
+            let isStatus = request.url?.path == SupportUploader.statusPath
+            if isStatus ? holdsStatus : holdsUpload {
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    lock.withLock { _cancelled.append(method) }
+                    throw error
+                }
+            }
+            if isStatus {
                 return (Data(#"{"available":\#(available)}"#.utf8), HTTPResult(status: 200, url: request.url))
             }
             return (Data(#"{"status":"check-email"}"#.utf8), HTTPResult(status: uploadStatus, url: request.url))
@@ -85,7 +149,6 @@ final class SupportCheckSessionTests: XCTestCase {
     private static let touchID: HIDInterfaceID = 21, mouseID: HIDInterfaceID = 22
 
     private var clock: TimeInterval = 1000
-    private var commands: [AppCommand] = []
 
     private func ilitek() throws -> [HIDInterfaceDescription] {
         let panel = try XCTUnwrap(SurveyFixtures.surveyB.touchscreen(vendorID: 0x222a, productID: 0x0001))
@@ -108,35 +171,49 @@ final class SupportCheckSessionTests: XCTestCase {
         return folder
     }
 
-    private func session(sending: SupportSending, transport: FakeTransport = FakeTransport(), target: Bool = true)
-        throws -> (StandInHIDSystem, SupportCheckSession, URL) {
-        let system = StandInHIDSystem(try ilitek())
-        let temporary = try folder()
-        let environment = SupportSessionEnvironment(
-            probe: SupportProbe(system: system), sending: sending, transport: transport,
-            readLog: {
-                [SupportLogEntry(date: Date(timeIntervalSince1970: 0), category: "devices",
-                                 message: #"Connected device-3: 222a:0001 "ILITEK-TP" serial "V06.00.00.00" at 0x01141000"#)]
-            },
-            mac: { SupportMac(model: "Mac15,6", macOS: "26.1", tactileVersion: "0.7.0", tactileBuild: "512", displays: 2) },
-            now: { [unowned self] in self.clock }, ticks: false, temporary: temporary, home: "/Users/someone")
-        let ilitek = try XCTUnwrap(PreviewModel(.desk).snapshot.touchscreens.first { $0.usbID == "222a:0001" })
-        let session = SupportCheckSession(
-            deviceID: target ? nil : "222a:0001@01141000", touchscreen: target ? SupportTarget(ilitek) : nil, name: ilitek.name,
-            perform: { [unowned self] in self.commands.append($0) }, environment: environment)
-        return (system, session, temporary)
+    private struct Desk {
+        let system: StandInHIDSystem
+        let model: FakeModel
+        let transport: FakeTransport
+        let book: DeviceLogBook
+        let session: SupportCheckSession
+        let temporary: URL
     }
 
-    /// Runs the check through: the ILITEK's one-finger take, then the other two steps skipped.
-    private func runThrough(_ session: SupportCheckSession, _ system: StandInHIDSystem) throws {
+    private func desk(sending: SupportSending, target: Bool = true, model given: FakeModel? = nil,
+                      transport: FakeTransport = FakeTransport()) throws -> Desk {
+        let model = given ?? FakeModel()
+        let system = StandInHIDSystem(try ilitek())
+        let temporary = try folder()
+        let book = DeviceLogBook()
+        let environment = SupportSessionEnvironment(
+            probe: SupportProbe(system: system, logBook: book), sending: sending, transport: transport, logBook: book,
+            mac: { SupportMac(model: "Mac15,6", macOS: "26.1", tactileVersion: "0.7.0", tactileBuild: "512", displays: 2) },
+            now: { [unowned self] in self.clock }, ticks: false, temporary: temporary, home: "/Users/someone")
+        model.isDeviceFree = { [unowned system] in
+            system.calls.filter { $0 == "open \(Self.touchID)" }.count == system.calls.filter { $0 == "close \(Self.touchID)" }.count
+        }
+        let ilitek = try XCTUnwrap(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek })
+        let session = SupportCheckSession(
+            deviceID: target ? nil : "222a:0001@01141000", touchscreen: target ? SupportTarget(ilitek) : nil, name: ilitek.name,
+            perform: { model.perform($0) }, snapshot: { target ? model.snapshot : nil }, environment: environment)
+        return Desk(system: system, model: model, transport: transport, book: book, session: session, temporary: temporary)
+    }
+
+    /// Starts the check and waits for its take.
+    private func start(_ session: SupportCheckSession) async {
         session.start()
+        await session.starting?.value
+    }
+
+    /// Runs the check through: the ILITEK's ten-finger take, then every step skipped.
+    private func runThrough(_ desk: Desk) async throws {
+        await start(desk.session)
         let take = try XCTUnwrap(SurveyFixtures.surveyB.touchscreen(vendorID: 0x222a, productID: 0x0001)?.takes.first { $0.number == 3 })
         let first = take.reports.first?.hostTime ?? 0
-        for report in take.reports { system.send(report.bytes, on: Self.touchID, at: clock + 0.1 + report.hostTime - first) }
+        for report in take.reports { desk.system.send(report.bytes, on: Self.touchID, at: clock + 0.1 + report.hostTime - first) }
         clock += 3
-        session.skip()
-        session.skip()
-        session.skip()
+        for _ in 0..<3 { desk.session.skip() }
     }
 
     private func settle(_ session: SupportCheckSession) async {
@@ -144,135 +221,263 @@ final class SupportCheckSessionTests: XCTestCase {
         await session.sendingTask?.value
     }
 
+    /// Waits, a turn at a time, until `condition` holds, for at most a second.
+    private func waitUntil(_ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(1)
+        while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
     // MARK: - Letting go and taking back
 
-    func testTheModelLetsGoForTheCheckAndTakesItBackAtTheEnd() throws {
-        let (system, session, _) = try session(sending: .off)
-        let check = try XCTUnwrap(session.check)
-        XCTAssertEqual(check.device.usbID, "222a:0001")
-        XCTAssertEqual(commands, [], "nothing until Start Check")
-        XCTAssertFalse(system.calls.contains { $0.hasPrefix("open") }, "nothing opened before Start Check")
+    func testTheModelLetsGoForTheCheckAndTakesItBackOnceTheDeviceIsFree() async throws {
+        let desk = try desk(sending: .off)
+        let check = try XCTUnwrap(desk.session.check)
+        XCTAssertEqual(desk.model.commands, [], "nothing until Start Check")
+        XCTAssertFalse(desk.system.calls.contains { $0.hasPrefix("open") }, "nothing opened before Start Check")
 
-        session.start()
-        XCTAssertEqual(commands, [.beginSupportCheck(UIFixtures.ilitek)])
-        XCTAssertTrue(system.calls.contains("open 21"))
+        await start(desk.session)
+        XCTAssertEqual(desk.model.commands, [.beginSupportCheck(UIFixtures.ilitek)])
+        XCTAssertTrue(desk.system.calls.contains("open 21"))
         XCTAssertEqual(check.stage, .touching(.one))
 
-        try runThroughRest(session)
+        for _ in 0..<3 { desk.session.skip() }
         XCTAssertEqual(check.stage, .finished)
-        XCTAssertEqual(commands, [.beginSupportCheck(UIFixtures.ilitek), .endSupportCheck], "taken back once the steps are over")
-        session.stop()
-        XCTAssertEqual(commands.filter { $0 == .endSupportCheck }.count, 1, "and only once")
+        XCTAssertEqual(desk.model.commands, [.beginSupportCheck(UIFixtures.ilitek), .endSupportCheck])
+        XCTAssertEqual(desk.model.deviceWasFreeAtEnd, [true], "taken back only once the check had closed it")
+        desk.session.stop()
+        XCTAssertEqual(desk.model.commands.filter { $0 == .endSupportCheck }.count, 1, "and only once")
     }
 
-    private func runThroughRest(_ session: SupportCheckSession) throws {
-        session.skip()
-        session.skip()
-        session.skip()
+    func testStartCheckWaitsWhileTactileCantLetGo() async throws {
+        let setUp = FakeModel()
+        setUp.snapshot.setUpMode = SetUpModeSnapshot(stage: .choosing, displays: [], touchscreens: [], justSetUp: nil, notice: nil)
+        let duringSetUp = try desk(sending: .off, model: setUp)
+        XCTAssertEqual(duringSetUp.session.startAvailability, .setUpRunning)
+        await start(duringSetUp.session)
+        XCTAssertEqual(duringSetUp.session.startRefusal, "Not while a set-up runs.")
+        XCTAssertEqual(setUp.commands, [], "the model isn't asked")
+        XCTAssertFalse(duringSetUp.system.calls.contains { $0.hasPrefix("open") }, "nothing opened")
+        XCTAssertEqual(duringSetUp.session.check?.stage, .ready)
+
+        let shared = FakeModel()
+        if let index = shared.snapshot.touchscreens.firstIndex(where: { $0.id == UIFixtures.ilitek }) {
+            shared.snapshot.touchscreens[index].notes.append(.macOSMayAlsoRespond)
+        }
+        let heldShared = try desk(sending: .off, model: shared)
+        await start(heldShared.session)
+        XCTAssertEqual(heldShared.session.startRefusal, "Another program holds this touchscreen. Quit it, then try again.")
+        XCTAssertEqual(shared.commands, [])
+
+        let refusing = FakeModel()
+        refusing.letsGo = false
+        let refused = try desk(sending: .off, model: refusing)
+        await start(refused.session)
+        XCTAssertEqual(refused.session.startRefusal, "Tactile couldn’t let go of the touchscreen just now. Try again in a moment.")
+        XCTAssertEqual(refusing.commands, [.beginSupportCheck(UIFixtures.ilitek), .endSupportCheck])
+        XCTAssertFalse(refused.system.calls.contains { $0.hasPrefix("open") }, "nothing it holds is touched")
+        XCTAssertEqual(refused.session.check?.stage, .ready)
     }
 
-    func testClosingMidCheckLetsTheDeviceGoAndGivesItBack() throws {
-        let (system, session, _) = try session(sending: .off)
-        session.start()
-        session.stop()
-        XCTAssertEqual(session.check?.stage, .finished)
-        XCTAssertEqual(session.check?.interruption, .stopped)
-        XCTAssertEqual(commands, [.beginSupportCheck(UIFixtures.ilitek), .endSupportCheck])
-        XCTAssertTrue(system.calls.contains("close 21"))
-        XCTAssertEqual(system.calls.last, "stopMatching")
+    /// Closed while a read is under way off the main thread: Tactile takes the touchscreen back only
+    /// once the read has returned and the check has closed the device.
+    func testClosingDuringTheTakeGivesItBackOnlyOnceTheDeviceIsFree() async throws {
+        let desk = try desk(sending: .off)
+        desk.system.holdsReads = true
+        desk.session.start()
+        await waitUntil { desk.system.readsHeld == 1 }
+        XCTAssertEqual(desk.session.check?.stage, .taking)
+        desk.session.stop()
+        XCTAssertEqual(desk.model.commands, [.beginSupportCheck(UIFixtures.ilitek)], "not yet: the read holds the device")
+        desk.system.letReadsGo()
+        await desk.session.starting?.value
+        XCTAssertEqual(desk.model.commands, [.beginSupportCheck(UIFixtures.ilitek), .endSupportCheck])
+        XCTAssertEqual(desk.model.deviceWasFreeAtEnd, [true])
+        XCTAssertFalse(desk.system.calls.contains { $0.hasPrefix("write") }, "nothing written after a read that was cut short")
+        XCTAssertEqual(desk.session.check?.interruption, .stopped)
     }
 
-    func testADeviceTactileDoesntListIsCheckedWithoutTheModel() throws {
-        let (_, session, _) = try session(sending: .off, target: false)
-        session.start()
-        try runThroughRest(session)
-        XCTAssertEqual(session.check?.stage, .finished)
-        XCTAssertEqual(commands, [], "the model has nothing to let go of")
+    func testADeviceTactileDoesntListIsCheckedWithoutTheModel() async throws {
+        let model = FakeModel()
+        let desk = try desk(sending: .off, target: false, model: model)
+        XCTAssertEqual(desk.session.startAvailability, .available)
+        await start(desk.session)
+        for _ in 0..<3 { desk.session.skip() }
+        XCTAssertEqual(desk.session.check?.stage, .finished)
+        XCTAssertEqual(model.commands, [], "the model has nothing to let go of")
     }
 
     func testADeviceThatIsntThereShowsWhy() throws {
-        let system = StandInHIDSystem([])
+        let book = DeviceLogBook()
         let environment = SupportSessionEnvironment(
-            probe: SupportProbe(system: system), sending: .off, transport: FakeTransport(), readLog: { [] },
-            mac: { SupportMac(model: "M", macOS: "26.1", tactileVersion: "0.7.0", tactileBuild: "1", displays: 1) },
+            probe: SupportProbe(system: StandInHIDSystem([]), logBook: book), sending: .off, transport: FakeTransport(),
+            logBook: book, mac: { SupportMac(model: "M", macOS: "26.1", tactileVersion: "0.7.0", tactileBuild: "1", displays: 1) },
             now: { 0 }, ticks: false, temporary: try folder(), home: "/")
-        let session = SupportCheckSession(deviceID: "1234:5678@01200000", touchscreen: nil, name: "Gone", perform: { _ in },
-                                          environment: environment)
+        let session = SupportCheckSession(deviceID: "1234:5678@01200000", touchscreen: nil, name: "Gone\u{202E}", perform: { _ in },
+                                          snapshot: { nil }, environment: environment)
         XCTAssertNil(session.check)
+        XCTAssertEqual(session.name, "Gone", "the name is plain text")
         session.start()
         session.stop()
     }
 
-    // MARK: - The sheet
+    // MARK: - Interrupted checks
+
+    func testAnInterruptedCheckHasNoReportToSend() async throws {
+        let asleep = try desk(sending: .on(.builtIn))
+        asleep.session.stop()  // the Mac went to sleep at step 1
+        XCTAssertEqual(asleep.session.check?.stage, .finished)
+        XCTAssertEqual(asleep.session.check?.interruption, .stopped)
+        asleep.session.showSheet()
+        XCTAssertFalse(asleep.session.isShowingSheet)
+        XCTAssertNil(asleep.session.archive)
+
+        let midway = try desk(sending: .on(.builtIn))
+        await start(midway.session)
+        midway.session.skip()
+        midway.session.stop()
+        XCTAssertEqual(midway.session.check?.wasInterrupted, true)
+        midway.session.showSheet()
+        midway.session.form.email = "someone@example.com"
+        midway.session.send()
+        XCTAssertEqual(midway.transport.methods, [], "never sent")
+    }
+
+    // MARK: - The report
+
+    /// Two identical units: the report's log holds the checked one's lines only.
+    func testTheLogHoldsOnlyTheCheckedUnitsLines() async throws {
+        let desk = try desk(sending: .off)
+        desk.book.note(Self.touchID, category: "devices", "Connected device-1: 222a:0001 at 0x01141000; 10 contacts")
+        desk.book.note(41, category: "devices", "Connected device-2: 222a:0001 at 0x01151000; 10 contacts")
+        desk.book.note(41, category: "devices", "UNIT-B-0002 of the other unit")
+        try await runThrough(desk)
+        desk.session.showSheet()
+        await settle(desk.session)
+        let log = String(decoding: try XCTUnwrap(desk.session.archive?.files.first { $0.name == "tactile-log.txt" }).data,
+                         as: UTF8.self)
+        XCTAssertTrue(log.contains("Connected device-1"), log)
+        XCTAssertTrue(log.contains("[support] Support check: taking it"), log)
+        XCTAssertFalse(log.contains("device-2") || log.contains("UNIT-B"), log)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: desk.temporary.path), [], "the zip's folder is removed")
+    }
 
     func testABuildThatDoesntSendOnlySaves() async throws {
-        let transport = FakeTransport()
-        let (system, session, temporary) = try session(sending: .off, transport: transport)
-        try runThrough(session, system)
-        session.showSheet()
-        await settle(session)
-        XCTAssertTrue(session.isShowingSheet)
-        let archive = try XCTUnwrap(session.archive)
-        XCTAssertEqual(archive.files.last?.name, "manifest.json")
-        XCTAssertTrue(String(decoding: try XCTUnwrap(archive.files.first { $0.name == "tactile-log.txt" }).data, as: UTF8.self)
-            .contains(#"serial "[serial removed]""#), "the log's line, without its serial")
-        XCTAssertEqual(session.sendStage, .off)
-        XCTAssertEqual(transport.methods, [], "nothing asked of any site")
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: temporary.path), [], "the zip's folder is removed")
+        let desk = try desk(sending: .off)
+        try await runThrough(desk)
+        desk.session.showSheet()
+        await settle(desk.session)
+        XCTAssertTrue(desk.session.isShowingSheet)
+        let archive = try XCTUnwrap(desk.session.archive)
+        XCTAssertEqual(desk.session.sendStage, .off)
+        desk.session.form.email = "someone@example.com"
+        desk.session.send()
+        XCTAssertEqual(desk.transport.methods, [], "a build that doesn't send never asks any site")
 
-        session.form.email = "someone@example.com"
-        session.send()
-        XCTAssertEqual(transport.methods, [], "a build that doesn't send never sends")
-
-        let saved = temporary.appendingPathComponent("saved.zip")
-        session.save(to: saved)
-        XCTAssertEqual(session.savedAs, "saved.zip")
+        let saved = desk.temporary.appendingPathComponent("saved.zip")
+        desk.session.save(to: saved)
+        XCTAssertEqual(desk.session.savedAs, "saved.zip")
         XCTAssertEqual(try Data(contentsOf: saved), archive.data, "the same zip the list showed")
     }
 
-    func testTheOfficialBuildAsksTheSiteThenSends() async throws {
-        let transport = FakeTransport()
-        let (system, session, _) = try session(sending: .on(.builtIn), transport: transport)
-        try runThrough(session, system)
-        session.showSheet()
-        XCTAssertEqual(session.sendStage, .checking)
-        await settle(session)
-        XCTAssertEqual(session.sendStage, .ready)
-        XCTAssertEqual(transport.methods, ["GET"])
+    // MARK: - Sending
 
-        session.send()
-        XCTAssertEqual(session.sendStage, .ready, "no email yet: nothing sent")
-        session.form.email = "someone@example.com"
-        session.send()
-        XCTAssertEqual(session.sendStage, .sending)
-        await settle(session)
-        XCTAssertEqual(session.sendStage, .sent)
-        XCTAssertEqual(transport.methods, ["GET", "GET", "POST"], "asked again just before the upload")
+    func testTheSiteIsAskedOnlyAtSend() async throws {
+        let desk = try desk(sending: .on(.builtIn))
+        try await runThrough(desk)
+        desk.session.showSheet()
+        await settle(desk.session)
+        XCTAssertEqual(desk.session.sendStage, .ready, "the form, at once")
+        XCTAssertEqual(desk.transport.methods, [], "nothing asked of the site before Send")
+
+        desk.session.send()
+        XCTAssertEqual(desk.transport.methods, [], "no email yet: nothing sent")
+        desk.session.form.email = "someone@example.com"
+        desk.session.send()
+        XCTAssertEqual(desk.session.sendStage, .sending)
+        await settle(desk.session)
+        XCTAssertEqual(desk.session.sendStage, .sent)
+        XCTAssertEqual(desk.transport.methods, ["GET", "POST"])
     }
 
-    func testWhenTheSiteDoesntTakeReportsTheSheetOffersSaving() async throws {
+    func testWhenTheSiteDoesntTakeReportsNothingIsUploaded() async throws {
         let transport = FakeTransport()
         transport.available = false
-        let (system, session, _) = try session(sending: .on(.builtIn), transport: transport)
-        try runThrough(session, system)
-        session.showSheet()
-        await settle(session)
-        XCTAssertEqual(session.sendStage, .unavailable)
-        XCTAssertFalse(SupportSendSheetContent(stage: session.sendStage, form: session.form, saved: false).showsForm)
+        let desk = try desk(sending: .on(.builtIn), transport: transport)
+        try await runThrough(desk)
+        desk.session.showSheet()
+        await settle(desk.session)
+        desk.session.form.email = "someone@example.com"
+        desk.session.send()
+        await settle(desk.session)
+        XCTAssertEqual(desk.session.sendStage, .unavailable)
+        XCTAssertFalse(SupportSendSheetContent(stage: desk.session.sendStage, form: desk.session.form, saved: false).showsForm)
         XCTAssertEqual(transport.methods, ["GET"], "nothing uploaded")
+    }
+
+    func testStoppingBeforeTheUploadSendsNothing() async throws {
+        let transport = FakeTransport()
+        transport.holdsStatus = true
+        let desk = try desk(sending: .on(.builtIn), transport: transport)
+        try await runThrough(desk)
+        desk.session.showSheet()
+        await settle(desk.session)
+        desk.session.form.email = "someone@example.com"
+        desk.session.send()
+        await waitUntil { transport.methods == ["GET"] }
+        desk.session.cancelSending()
+        XCTAssertEqual(desk.session.sendStage, .notSent)
+        await desk.session.sendingTask?.value
+        XCTAssertEqual(desk.session.sendStage, .notSent, "a cancelled send never goes on")
+        XCTAssertEqual(transport.methods, ["GET"])
+        XCTAssertEqual(transport.cancelled, ["GET"])
+    }
+
+    func testStoppingDuringTheUploadSaysItMayHaveGone() async throws {
+        let transport = FakeTransport()
+        transport.holdsUpload = true
+        let desk = try desk(sending: .on(.builtIn), transport: transport)
+        try await runThrough(desk)
+        desk.session.showSheet()
+        await settle(desk.session)
+        desk.session.form.email = "someone@example.com"
+        desk.session.send()
+        await waitUntil { transport.methods == ["GET", "POST"] }
+        desk.session.cancelSending()
+        XCTAssertEqual(desk.session.sendStage, .mayHaveBeenSent)
+        await desk.session.sendingTask?.value
+        XCTAssertEqual(desk.session.sendStage, .mayHaveBeenSent)
+        XCTAssertEqual(transport.cancelled, ["POST"], "the upload was cancelled")
+        desk.session.send()
+        XCTAssertEqual(transport.methods, ["GET", "POST"], "never sent twice")
+    }
+
+    func testClosingTheWindowWhileSendingCancelsIt() async throws {
+        let transport = FakeTransport()
+        transport.holdsUpload = true
+        let desk = try desk(sending: .on(.builtIn), transport: transport)
+        try await runThrough(desk)
+        desk.session.showSheet()
+        await settle(desk.session)
+        desk.session.form.email = "someone@example.com"
+        desk.session.send()
+        await waitUntil { transport.methods == ["GET", "POST"] }
+        desk.session.stop()
+        XCTAssertEqual(desk.session.closedWhileSending, .mayHaveBeenSent, "the window tells the person")
+        await desk.session.sendingTask?.value
+        XCTAssertEqual(transport.cancelled, ["POST"])
     }
 
     func testAnUploadRefusedAfterAYesIsUnavailable() async throws {
         let transport = FakeTransport()
         transport.uploadStatus = 503
-        let (system, session, _) = try session(sending: .on(.builtIn), transport: transport)
-        try runThrough(session, system)
-        session.showSheet()
-        await settle(session)
-        session.form.email = "someone@example.com"
-        session.send()
-        await settle(session)
-        XCTAssertEqual(session.sendStage, .unavailable)
+        let desk = try desk(sending: .on(.builtIn), transport: transport)
+        try await runThrough(desk)
+        desk.session.showSheet()
+        await settle(desk.session)
+        desk.session.form.email = "someone@example.com"
+        desk.session.send()
+        await settle(desk.session)
+        XCTAssertEqual(desk.session.sendStage, .unavailable)
     }
 
     // MARK: - Pictures, for a person to look at
@@ -289,33 +494,48 @@ final class SupportCheckSessionTests: XCTestCase {
         _ = NSApplication.shared
         NSApplication.shared.setActivationPolicy(.prohibited)
 
-        let (system, session, temporary) = try session(sending: .on(.builtIn))
+        let desk = try desk(sending: .on(.builtIn))
+        let session = desk.session
         try render(SupportCheckView(session: session), size: SupportCheckWindow.size, to: out, name: "support-1-ready")
-        session.start()
+        await start(session)
         clock += 4
         session.tick()
-        system.send([0x04] + [UInt8](repeating: 0, count: 62), on: Self.touchID, at: clock)
+        desk.system.send([0x04] + [UInt8](repeating: 0, count: 62), on: Self.touchID, at: clock)
         try render(SupportCheckView(session: session), size: SupportCheckWindow.size, to: out, name: "support-2-touching")
-        try runThrough(session, system)
+        let take = try XCTUnwrap(SurveyFixtures.surveyB.touchscreen(vendorID: 0x222a, productID: 0x0001)?.takes.first { $0.number == 3 })
+        let first = take.reports.first?.hostTime ?? 0
+        for report in take.reports { desk.system.send(report.bytes, on: Self.touchID, at: clock + 0.1 + report.hostTime - first) }
+        for _ in 0..<3 { session.skip() }
         try render(SupportCheckView(session: session), size: SupportCheckWindow.size, to: out, name: "support-3-verdict")
         session.showSheet()
         await settle(session)
         session.form.email = "someone@example"
         try render(SupportSendSheet(session: session), size: SupportSendSheet.size, to: out, name: "support-4-sheet")
-        session.save(to: temporary.appendingPathComponent("r.zip"))
-        session.form.email = "someone@example.com"
+
         let unavailable = FakeTransport()
         unavailable.available = false
-        let (system2, offline, _) = try self.session(sending: .on(.builtIn), transport: unavailable)
-        try runThrough(offline, system2)
-        offline.showSheet()
-        await settle(offline)
-        offline.save(to: temporary.appendingPathComponent("r2.zip"))
-        try render(SupportSendSheet(session: offline), size: SupportSendSheet.size, to: out, name: "support-5-unavailable")
+        let offline = try self.desk(sending: .on(.builtIn), transport: unavailable)
+        try await runThrough(offline)
+        offline.session.showSheet()
+        await settle(offline.session)
+        offline.session.form.email = "someone@example.com"
+        offline.session.send()
+        await settle(offline.session)
+        offline.session.save(to: offline.temporary.appendingPathComponent("r2.zip"))
+        try render(SupportSendSheet(session: offline.session), size: SupportSendSheet.size, to: out, name: "support-5-unavailable")
         try render(SupportFileViewer(file: try XCTUnwrap(session.archive?.files.first)), size: CGSize(width: 640, height: 520),
                    to: out, name: "support-6-viewer")
         try render(Form { NotListedSection(snapshot: PreviewModel(.desk).snapshot, perform: { _ in }, list: nil) }.formStyle(.grouped),
                    size: CGSize(width: 560, height: 220), to: out, name: "support-7-not-listed")
+
+        let refusing = FakeModel()
+        refusing.snapshot.setUpMode = SetUpModeSnapshot(stage: .choosing, displays: [], touchscreens: [], justSetUp: nil, notice: nil)
+        let waiting = try self.desk(sending: .off, model: refusing)
+        try render(SupportCheckView(session: waiting.session), size: SupportCheckWindow.size, to: out, name: "support-8-start-waits")
+        let interrupted = try self.desk(sending: .off)
+        await start(interrupted.session)
+        interrupted.session.stop()
+        try render(SupportCheckView(session: interrupted.session), size: SupportCheckWindow.size, to: out, name: "support-9-interrupted")
     }
 
     private func render<V: View>(_ view: V, size: CGSize, to folder: URL, name: String) throws {

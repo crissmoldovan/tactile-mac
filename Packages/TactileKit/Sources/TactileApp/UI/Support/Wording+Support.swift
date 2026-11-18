@@ -19,8 +19,15 @@ extension Wording {
         case .available: return ""
         case .notConnected: return "Connect it first."
         case .setUpRunning: return "Not while a set-up runs."
+        case .heldShared: return "Another program holds this touchscreen. Quit it, then try again."
         }
     }
+
+    static let supportLetGoRefused = "Tactile couldn’t let go of the touchscreen just now. Try again in a moment."
+    static let readingTouchscreen = "Reading the touchscreen…"
+    static let interruptedTitle = "Interrupted"
+    static let tryAgain = "Close this window, then start the check again."
+    static let stopSending = "Stop Sending"
 
     static let notListedTitle = "Touchscreen Not Listed?"
     static let notListedExplanation =
@@ -154,11 +161,12 @@ extension Wording {
         }
     }
 
-    static func supportInterruption(_ interruption: SupportCheck.Interruption) -> String? {
+    static func supportInterruption(_ interruption: SupportCheck.Interruption) -> String {
         switch interruption {
         case .notConnected: return "It wasn’t connected when the check began."
+        case .couldNotOpen: return "Tactile couldn’t open it. Another program may be using it."
         case .unplugged: return "It was unplugged, so the check stopped."
-        case .stopped: return nil
+        case .stopped: return "The check stopped when the Mac went to sleep."
         }
     }
 
@@ -183,7 +191,9 @@ extension Wording {
     static let saveReport = "Save Report…"
     static let emailInvalid = "That email address doesn’t look right."
     static let noteTooLong = "The note is longer than 1,000 characters."
-    static let checkingSending = "Checking whether reports can be sent…"
+    static let sendingNotSent = "Sending stopped. Nothing was sent."
+    static let sendingMayHaveBeenSent =
+        "Your report may already have been sent. Check your email: nothing is filed until you confirm it."
     static let reportSent = "Check your email to confirm. Nothing is filed until you do."
     static let tryLater = "Too many reports from here just now. Try again later, or save the report."
     static let sendingTooSlow = "Sending took too long. You can save the report instead."

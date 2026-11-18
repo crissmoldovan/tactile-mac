@@ -33,6 +33,12 @@ final class SupportCheckInterfaceTests: XCTestCase {
         let twin = try XCTUnwrap(twins.touchscreens.first { $0.notes.contains(.cannotBeToldApart) })
         XCTAssertEqual(SupportCheckAvailability.of(twin, in: twins), .available, "one Tactile can't use is just the kind to check")
 
+        var shared = ilitek
+        shared.notes.append(.macOSMayAlsoRespond)
+        XCTAssertEqual(SupportCheckAvailability.of(shared, in: model.snapshot), .heldShared,
+                       "held shared: another program has it, and the check couldn't take it as Tactile does")
+        XCTAssertEqual(Wording.supportUnavailable(.heldShared), "Another program holds this touchscreen. Quit it, then try again.")
+
         model.perform(.beginSetUpMode)
         let settingUp = try XCTUnwrap(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek })
         XCTAssertEqual(SupportCheckAvailability.of(settingUp, in: model.snapshot), .setUpRunning)
@@ -97,8 +103,11 @@ final class SupportCheckInterfaceTests: XCTestCase {
         XCTAssertEqual(SupportStepMarks(stage: .ready, steps: []).marks, [.current, .pending, .pending, .pending])
         XCTAssertEqual(SupportStepMarks(stage: .touching(.five), steps: [one, two, five]).marks, [.done, .done, .current, .pending])
         XCTAssertEqual(SupportStepMarks(stage: .finished, steps: [one, two]).marks, [.done, .done, .done, .done])
-        XCTAssertEqual(SupportStepMarks(stage: .finished, steps: []).marks, [.done, .skipped, .skipped, .done],
-                       "a check that couldn't take the device")
+        XCTAssertEqual(SupportStepMarks(stage: .taking, steps: []).marks, [.done, .current, .pending, .pending])
+        XCTAssertEqual(SupportStepMarks(stage: .finished, steps: [], interrupted: true).marks, [.done, .skipped, .skipped, .skipped],
+                       "a check that couldn't take the device: no verdict")
+        XCTAssertEqual(SupportStepMarks(stage: .finished, steps: [one], interrupted: true).marks, [.done, .done, .skipped, .skipped],
+                       "interrupted during the touches: no verdict")
     }
 
     func testTheTouchPromptsAndCounts() {
@@ -125,7 +134,10 @@ final class SupportCheckInterfaceTests: XCTestCase {
         XCTAssertEqual(Wording.verdictSentence(.noReports), "Nothing came from it.")
         XCTAssertEqual(Wording.supportInterruption(.unplugged), "It was unplugged, so the check stopped.")
         XCTAssertEqual(Wording.supportInterruption(.notConnected), "It wasn’t connected when the check began.")
-        XCTAssertNil(Wording.supportInterruption(.stopped))
+        XCTAssertEqual(Wording.supportInterruption(.stopped), "The check stopped when the Mac went to sleep.")
+        XCTAssertEqual(Wording.supportInterruption(.couldNotOpen), "Tactile couldn’t open it. Another program may be using it.")
+        XCTAssertEqual(Wording.interruptedTitle, "Interrupted")
+        XCTAssertEqual(Wording.tryAgain, "Close this window, then start the check again.")
         XCTAssertEqual(Wording.sendToDeveloper, "Send to Tactile’s Developer…")
     }
 
@@ -157,10 +169,6 @@ final class SupportCheckInterfaceTests: XCTestCase {
         XCTAssertEqual(off.message, "This build of Tactile doesn’t send reports. Save the report, then attach it to a touchscreen report on GitHub.")
         XCTAssertTrue(off.showsGitHub)
 
-        let checking = Content(stage: .checking, form: ready, saved: false)
-        XCTAssertFalse(checking.showsForm)
-        XCTAssertEqual(checking.message, "Checking whether reports can be sent…")
-
         let form = Content(stage: .ready, form: ready, saved: false)
         XCTAssertTrue(form.showsForm)
         XCTAssertTrue(form.showsSend)
@@ -171,6 +179,19 @@ final class SupportCheckInterfaceTests: XCTestCase {
         let sending = Content(stage: .sending, form: ready, saved: false)
         XCTAssertFalse(sending.formIsEnabled)
         XCTAssertFalse(sending.sendEnabled)
+        XCTAssertTrue(sending.stopsSending, "its cancel button, and Esc, stop the sending")
+        XCTAssertEqual(Wording.stopSending, "Stop Sending")
+        XCTAssertFalse(form.stopsSending)
+
+        let notSent = Content(stage: .notSent, form: ready, saved: false)
+        XCTAssertEqual(notSent.message, "Sending stopped. Nothing was sent.")
+        XCTAssertTrue(notSent.sendEnabled, "it can be sent again")
+
+        let mayHave = Content(stage: .mayHaveBeenSent, form: ready, saved: false)
+        XCTAssertEqual(mayHave.message,
+                       "Your report may already have been sent. Check your email: nothing is filed until you confirm it.")
+        XCTAssertFalse(mayHave.showsSend, "never sent twice")
+        XCTAssertTrue(mayHave.showsSaveReport)
 
         let sent = Content(stage: .sent, form: ready, saved: false)
         XCTAssertEqual(sent.message, "Check your email to confirm. Nothing is filed until you do.")
@@ -220,7 +241,8 @@ final class SupportCheckInterfaceTests: XCTestCase {
             Wording.supportStepSentence(1, kind: .mouseOnly), Wording.supportStepSentence(2, kind: .touchscreen),
             Wording.supportStepSentence(1, kind: .digitizer, hasTouchInterface: false),
             Wording.supportStepSentence(3, kind: .touchscreen), Wording.sendSheetIntro, Wording.sendToDeveloper,
-            Wording.verdictTitle(.doesNotWork), Wording.supportCantFind,
+            Wording.verdictTitle(.doesNotWork), Wording.supportCantFind, Wording.supportLetGoRefused,
+            Wording.supportInterruption(.couldNotOpen), Wording.sendingMayHaveBeenSent, Wording.readingTouchscreen,
         ]
         for text in words {
             XCTAssertFalse(text.contains("'"), text)
