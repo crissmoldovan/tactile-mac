@@ -190,7 +190,8 @@ final class SupportCheckInterfaceTests: XCTestCase {
 
         let mayHave = Content(stage: .mayHaveBeenSent, form: ready, saved: false)
         XCTAssertEqual(mayHave.message,
-                       "Your report may already have been sent. Check your email: nothing is filed until you confirm it.")
+                       "Your report may already have been sent. Check your email: nothing is filed until you confirm it. "
+                       + "If you’d rather it wasn’t filed, ignore that email.")
         XCTAssertFalse(mayHave.showsSend, "never sent twice")
         XCTAssertTrue(mayHave.showsSaveReport)
 
@@ -218,6 +219,18 @@ final class SupportCheckInterfaceTests: XCTestCase {
 
         let saved = Content(stage: .ready, form: ready, saved: true)
         XCTAssertTrue(saved.showsGitHub, "once saved, GitHub is offered")
+    }
+
+    /// Closing the window after a report may have gone: an alert with a short title, never while
+    /// Tactile quits (it is logged instead, so quitting never waits on a click).
+    func testTheNoticeWhenTheWindowClosesWhileSending() {
+        let notice = SupportClosingNotice.alert(closedWhileSending: .mayHaveBeenSent, isQuitting: false)
+        XCTAssertEqual(notice?.title, "Your report may already have been sent.")
+        XCTAssertEqual(notice?.detail,
+                       "Check your email: nothing is filed until you confirm it. If you’d rather it wasn’t filed, ignore that email.")
+        XCTAssertNil(SupportClosingNotice.alert(closedWhileSending: .mayHaveBeenSent, isQuitting: true), "never while quitting")
+        XCTAssertNil(SupportClosingNotice.alert(closedWhileSending: .notSent, isQuitting: false), "nothing was sent")
+        XCTAssertNil(SupportClosingNotice.alert(closedWhileSending: nil, isQuitting: false))
     }
 
     func testTheSheetsWords() {

@@ -11,6 +11,16 @@ enum SupportLinks {
     static let touchscreenReport = URL(string: "https://github.com/crissmoldovan/tactile-mac/issues/new?template=touchscreen_report.yml")!
 }
 
+/// What the person is told when the check's window closes while a report goes.
+enum SupportClosingNotice {
+    /// An alert's title and text when the report may already have reached the site; nil when nothing
+    /// was sent, and always while Tactile quits: quitting never waits on a click (the window logs it).
+    static func alert(closedWhileSending: SupportSendStage?, isQuitting: Bool) -> (title: String, detail: String)? {
+        guard closedWhileSending == .mayHaveBeenSent, !isQuitting else { return nil }
+        return (Wording.sendingMayHaveBeenSentTitle, Wording.sendingMayHaveBeenSentDetail)
+    }
+}
+
 /// Whether Help Me Support This Touchscreen… can start now, for a touchscreen Tactile lists.
 enum SupportCheckAvailability: Equatable, Sendable {
     case available

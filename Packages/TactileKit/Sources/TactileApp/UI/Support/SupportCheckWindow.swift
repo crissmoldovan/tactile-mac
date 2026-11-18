@@ -28,7 +28,7 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
         observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.closeByItself(reason: "Tactile is quitting") }
+            MainActor.assumeIsolated { self?.closeByItself(reason: "Tactile is quitting", isQuitting: true) }
         })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
@@ -108,23 +108,26 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    private func closeByItself(reason: String) {
+    private func closeByItself(reason: String, isQuitting: Bool = false) {
         guard let window else { return }
         isClosingByItself = true
         window.close()
         isClosingByItself = false
-        forget()
+        forget(isQuitting: isQuitting)
         InterfaceLog.log.info("touchscreen check window closed (\(reason, privacy: .public))")
     }
 
-    private func forget() {
+    private func forget(isQuitting: Bool = false) {
         session?.stop()
-        if session?.closedWhileSending == .mayHaveBeenSent {
+        if let notice = SupportClosingNotice.alert(closedWhileSending: session?.closedWhileSending, isQuitting: isQuitting) {
             // The window has gone: the person still hears that the report may have reached the site.
             let alert = NSAlert()
-            alert.messageText = Wording.sendingMayHaveBeenSent
+            alert.messageText = notice.title
+            alert.informativeText = notice.detail
             alert.alertStyle = .informational
             alert.runModal()
+        } else if isQuitting, session?.closedWhileSending == .mayHaveBeenSent {
+            InterfaceLog.log.notice("touchscreen check: Tactile quit while a report was being sent; it may already have reached the site")
         }
         session = nil
         window = nil

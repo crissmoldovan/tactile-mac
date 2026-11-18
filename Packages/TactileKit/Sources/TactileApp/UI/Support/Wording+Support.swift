@@ -195,8 +195,10 @@ extension Wording {
     static let emailInvalid = "That email address doesn’t look right."
     static let noteTooLong = "The note is longer than 1,000 characters."
     static let sendingNotSent = "Sending stopped. Nothing was sent."
-    static let sendingMayHaveBeenSent =
-        "Your report may already have been sent. Check your email: nothing is filed until you confirm it."
+    static let sendingMayHaveBeenSentTitle = "Your report may already have been sent."
+    static let sendingMayHaveBeenSentDetail =
+        "Check your email: nothing is filed until you confirm it. If you’d rather it wasn’t filed, ignore that email."
+    static let sendingMayHaveBeenSent = sendingMayHaveBeenSentTitle + " " + sendingMayHaveBeenSentDetail
     static let reportSent = "Check your email to confirm. Nothing is filed until you do."
     static let tryLater = "Too many reports from here just now. Try again later, or save the report."
     static let sendingTooSlow = "Sending took too long. You can save the report instead."
