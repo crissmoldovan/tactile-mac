@@ -27,9 +27,9 @@ public struct SupportInterface: Equatable, Sendable {
         case mouse
         /// A mouse-only device's absolute pointer: opened and listened to, never read or written.
         case pointer
-        /// A digitiser's interface, when Tactile can't tell which one takes touches (no Touch Screen or
-        /// Touch Pad collection): opened and listened to, never read or written, so nothing is switched
-        /// on a guess.
+        /// A digitiser's interface (a touch pad, a pen, a digitiser): Tactile drives only touchscreens,
+        /// so it is opened and listened to, never read or written. Nothing is switched on a guess: a
+        /// touch pad's Input Mode, for one, isn't a touchscreen's.
         case digitizer
         /// Anything else of the device (a vendor interface, say): described in the report, never opened.
         case other
@@ -136,12 +136,10 @@ public enum DeviceText {
 ///   taken for that device's mouse interface.
 /// - **Its interfaces' roles:** a touchscreen's touch interface is the one the source would read
 ///   (`InterfaceChoice.touchInterface`), and its mouse is the sibling the source would open
-///   (`InterfaceChoice.mouseSibling`); a digitiser's touch interface is its first interface with a
-///   Touch Pad collection, never one whose first usage is vendor-defined, with a mouse sibling found
-///   the same way. When it has none, Tactile can't tell which interface takes touches, and guesses
-///   nothing: its digitiser interfaces (not a vendor or Device Configuration one) are `digitizer`,
-///   only listened to. A mouse-only device's absolute pointers are its pointers. Every other
-///   interface is `other`, and is never opened.
+///   (`InterfaceChoice.mouseSibling`). A digitiser has no touch interface: Tactile drives only
+///   touchscreens, so its digitiser interfaces (a touch pad's included; never a vendor-defined or
+///   Device Configuration one) are `digitizer`, only listened to. A mouse-only device's absolute
+///   pointers are its pointers. Every other interface is `other`, and is never opened.
 /// - **Its strings** are plain text (`DeviceText`).
 enum SupportDevices {
     static let appleVendorIDs: Set<Int> = [0x05AC, 0x004C]
@@ -179,13 +177,8 @@ enum SupportDevices {
             if let mouse = InterfaceChoice.mouseSibling(of: touch, among: group) { roles[mouse.id] = .mouse }
         } else if group.contains(where: { isDigitizer($0, summaries[$0.id] ?? nil) }) {
             kind = .digitizer
-            if let touch = group.first(where: { hasTouchPad($0, summaries[$0.id] ?? nil) }) {
-                roles[touch.id] = .touch
-                if let mouse = InterfaceChoice.mouseSibling(of: touch, among: group) { roles[mouse.id] = .mouse }
-            } else {
-                for interface in group where isListenedDigitizer(interface, summaries[interface.id] ?? nil) {
-                    roles[interface.id] = .digitizer
-                }
+            for interface in group where isListenedDigitizer(interface, summaries[interface.id] ?? nil) {
+                roles[interface.id] = .digitizer
             }
         } else {
             let pointers = group.filter { summaries[$0.id]??.hasAbsolutePointer == true }
@@ -225,11 +218,6 @@ enum SupportDevices {
     /// Its first collection is vendor-defined (page 0xFF00 and above).
     private static func isVendorFirst(_ interface: KnownInterface, _ summary: DescriptorSummary?) -> Bool {
         (collections(interface, summary).first?.page ?? 0) >= 0xFF00
-    }
-
-    /// A Touch Pad collection (0x0D/0x05), on an interface whose first collection isn't vendor-defined.
-    private static func hasTouchPad(_ interface: KnownInterface, _ summary: DescriptorSummary?) -> Bool {
-        !isVendorFirst(interface, summary) && collections(interface, summary).contains(HIDUsage(page: 0x0D, usage: 0x05))
     }
 
     /// A Digitizer-page collection other than Device Configuration (0x0D/0x0E), on an interface whose

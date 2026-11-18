@@ -348,7 +348,8 @@ public enum SupportReport {
         } else if input.device.kind == .mouseOnly {
             why = "mouse-only: it has no touch interface to read or switch"
         } else if input.device.touchInterface == nil {
-            why = "digitiser: no Touch Screen or Touch Pad interface, so Tactile read and switched nothing; its digitiser interfaces were only listened to"
+            why = "digitiser: Tactile drives only touchscreens, so it read and switched nothing; its digitiser interfaces, "
+                + "a touch pad's included, were only listened to"
         } else {
             why = nil
         }
@@ -543,7 +544,7 @@ public enum SupportReport {
             if device.kind == .mouseOnly {
                 lines.append("Skipped: it is only a mouse, so there is nothing to read or switch.")
             } else if device.touchInterface == nil {
-                lines.append("Skipped: Tactile can’t tell which interface takes touches, so it read and switched nothing.")
+                lines.append("Skipped: Tactile drives only touchscreens, so it read and switched nothing on this digitiser.")
             }
             for open in switches.opens {
                 let number = numbers[open.interface] ?? 0

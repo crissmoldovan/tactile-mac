@@ -76,7 +76,7 @@ extension Wording {
             if kind == .mouseOnly { return "It only acts as a mouse, so there is nothing to switch." }
             return hasTouchInterface
                 ? "Tactile takes it as it always does: it reads its settings, then switches it to multi-touch where it can."
-                : "Tactile can’t tell which part of it takes touches, so it switches nothing."
+                : "Tactile drives only touchscreens, so it switches nothing here. It only listens."
         case 2: return "Touch it when asked. Each step lasts up to 15 seconds."
         default: return "What Tactile made of it."
         }

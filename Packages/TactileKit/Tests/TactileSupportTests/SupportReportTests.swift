@@ -159,6 +159,27 @@ final class SupportReportTests: XCTestCase {
         XCTAssertEqual((mouseOnly["feature_reads"] as? [Any])?.count, 0)
     }
 
+    /// A digitiser Tactile doesn't drive: nothing read or switched, and the report says why.
+    func testADigitisersSwitchesSayWhyNothingWasSwitched() throws {
+        var input = Fixture.pointerInput()
+        let interface = input.device.interfaces[0]
+        input.device = SupportDevice(
+            id: "0eef:7200@01600000", kind: .digitizer, vendorID: 0x0eef, productID: 0x7200, product: "Panel", manufacturer: "",
+            serial: "", locationID: 0x0160_0000,
+            interfaces: [SupportInterface(id: interface.id, role: .digitizer, usages: [.init(page: 0x0D, usage: 0x05)],
+                                          descriptor: interface.descriptor, maxInputReportSize: 6)])
+        input.identity = SupportIdentity(input.device)
+        let files = SupportReport.files(input)
+        let switches = try Fixture.json(files[named: "switches.json"])
+        XCTAssertEqual(switches["skipped"] as? Bool, true)
+        XCTAssertEqual(switches["why"] as? String,
+                       "digitiser: Tactile drives only touchscreens, so it read and switched nothing; its digitiser interfaces, "
+                       + "a touch pad's included, were only listened to")
+        let summary = String(decoding: try XCTUnwrap(files[named: "summary.txt"]).data, as: UTF8.self)
+        XCTAssertTrue(summary.contains("Skipped: Tactile drives only touchscreens, so it read and switched nothing on this digitiser."),
+                      summary)
+    }
+
     func testTouchesJSON() throws {
         let touches = try Fixture.json(SupportReport.files(try Fixture.ilitekInput())[named: "touches.json"])
         let steps = try XCTUnwrap(touches["steps"] as? [[String: Any]])

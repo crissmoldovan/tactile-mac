@@ -107,8 +107,9 @@ final class SupportDevicesTests: XCTestCase {
     // MARK: - A digitiser's touch interface (M-6)
 
     /// A digitiser whose first interface is vendor-defined, with a Device Configuration collection
-    /// beside it, then a Touch Pad interface: the Touch Pad interface is the one switched.
-    func testADigitisersTouchInterfaceIsItsTouchPadNeverAVendorInterface() throws {
+    /// beside it, then a Touch Pad interface: nothing is switched (a touch pad's Input Mode isn't a
+    /// touchscreen's), the Touch Pad interface is only listened to, and the vendor one not even that.
+    func testATouchPadIsOnlyListenedToNeverSwitched() throws {
         let location: UInt32 = 0x0160_0000
         let vendor = HIDInterfaceDescription(
             id: 81, locationID: location, vendorID: 0x0eef, productID: 0x7200, serial: "", product: "Panel",
@@ -122,7 +123,8 @@ final class SupportDevicesTests: XCTestCase {
             usages: [HIDUsage(page: 0x0D, usage: 0x05)], descriptor: touchPadDescriptor, maxInputReportSize: 16)
         let device = try XCTUnwrap(devices([vendor, touchPad]).first)
         XCTAssertEqual(device.kind, .digitizer)
-        XCTAssertEqual(roles(device), [81: .other, 82: .touch])
+        XCTAssertNil(device.touchInterface)
+        XCTAssertEqual(roles(device), [81: .other, 82: .digitizer])
     }
 
     /// A pen alone has no Touch Screen or Touch Pad collection: Tactile can't tell which interface
