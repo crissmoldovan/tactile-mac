@@ -33,7 +33,7 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.session?.stop() }
+            MainActor.assumeIsolated { self?.session?.sleep() }
         })
     }
 

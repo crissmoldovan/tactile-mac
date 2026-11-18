@@ -397,6 +397,32 @@ final class SupportCheckSessionTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: saved), archive.data, "the same zip the list showed")
     }
 
+    /// Sleep while the report is being made: making it sends nothing, so it goes on, and the sheet
+    /// shows it after wake.
+    func testSleepDoesntStopTheReportBeingMade() async throws {
+        let desk = try desk(sending: .off)
+        try await runThrough(desk)
+        desk.session.showSheet()
+        desk.session.sleep()
+        await desk.session.preparing?.value
+        XCTAssertNotNil(desk.session.archive, "made all the same")
+        XCTAssertNil(desk.session.check?.interruption, "a finished check stays finished")
+    }
+
+    /// A report whose making was cancelled (the window closing) is made again when the sheet opens
+    /// again, never left on "Making the report…".
+    func testACancelledReportIsMadeAgain() async throws {
+        let desk = try desk(sending: .off)
+        try await runThrough(desk)
+        desk.session.showSheet()
+        desk.session.stop()
+        XCTAssertNil(desk.session.preparing, "cancelled, and forgotten")
+        desk.session.showSheet()
+        XCTAssertNotNil(desk.session.preparing, "made again")
+        await desk.session.preparing?.value
+        XCTAssertNotNil(desk.session.archive)
+    }
+
     // MARK: - Sending
 
     func testTheSiteIsAskedOnlyAtSend() async throws {

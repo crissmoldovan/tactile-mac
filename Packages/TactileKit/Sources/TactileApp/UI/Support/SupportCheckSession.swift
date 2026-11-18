@@ -190,12 +190,26 @@ final class SupportCheckSession {
         check?.tick(at: now)
     }
 
-    /// The window closed, the Mac is going to sleep, or Tactile is quitting: the check stops, the
-    /// device is let go, sending stops, and Tactile takes its touchscreen back once the device is free.
+    /// The window closed, or Tactile is quitting: the check stops, the device is let go, the report
+    /// being made and any sending stop, and Tactile takes its touchscreen back once the device is free.
     func stop() {
+        stop(cancellingReport: true)
+    }
+
+    /// The Mac is going to sleep: as `stop()`, but the report being made goes on, as making it sends
+    /// nothing; a finished check stays finished, and its sheet shows the report after wake.
+    func sleep() {
+        stop(cancellingReport: false)
+    }
+
+    private func stop(cancellingReport: Bool) {
         timer?.invalidate()
         timer = nil
-        preparing?.cancel()
+        if cancellingReport, let preparing {
+            // Forgotten, so that opening the sheet again makes it again.
+            preparing.cancel()
+            self.preparing = nil
+        }
         if sendStage == .sending {
             cancelSending()
             closedWhileSending = sendStage
