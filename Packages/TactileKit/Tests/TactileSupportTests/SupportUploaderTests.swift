@@ -9,17 +9,26 @@ import XCTest
 /// here touches the network.
 final class SupportUploaderTests: XCTestCase {
 
-    /// Records each request, and answers as told.
+    /// Records each request, and answers as told: the status, `{"available":true}` unless told
+    /// otherwise; the upload, `answer`.
     private final class FakeTransport: SupportTransport, @unchecked Sendable {
         var requests: [URLRequest] = []
         var answer: (Data, HTTPResult)?
         var failure: Error?
+        var status: (Data, HTTPResult)?
+        var statusFailure: Error?
 
-        func post(_ request: URLRequest) async throws -> (Data, HTTPResult) {
+        func perform(_ request: URLRequest) async throws -> (Data, HTTPResult) {
             requests.append(request)
+            if request.url?.path == "/api/support/status" {
+                if let statusFailure { throw statusFailure }
+                return status ?? (Data(#"{"available":true}"#.utf8), HTTPResult(status: 200, url: request.url))
+            }
             if let failure { throw failure }
             return answer ?? (Data(), HTTPResult(status: 500, url: request.url))
         }
+
+        var uploads: [URLRequest] { requests.filter { $0.httpMethod == "POST" } }
     }
 
     private let site = UpdateSite.builtIn
@@ -64,7 +73,7 @@ final class SupportUploaderTests: XCTestCase {
         transport.answer = (Data(#"{"status":"check-email"}"#.utf8), HTTPResult(status: 202, url: endpoint))
         let uploader = SupportUploader(site: site, transport: transport, boundary: { "TactileBoundary1234" })
         _ = await uploader.send(try request())
-        let sent = try XCTUnwrap(transport.requests.first)
+        let sent = try XCTUnwrap(transport.uploads.first)
         XCTAssertEqual(sent.url, endpoint)
         XCTAssertEqual(sent.httpMethod, "POST")
         XCTAssertEqual(sent.value(forHTTPHeaderField: "Content-Type"), "multipart/form-data; boundary=TactileBoundary1234")
@@ -96,7 +105,7 @@ final class SupportUploaderTests: XCTestCase {
         let transport = FakeTransport()
         let uploader = SupportUploader(site: site, transport: transport, boundary: { "B0" })
         _ = await uploader.send(try request(note: "  \n "))
-        let body = try XCTUnwrap(transport.requests.first?.httpBody)
+        let body = try XCTUnwrap(transport.uploads.first?.httpBody)
         XCTAssertEqual(parts(body, boundary: "B0").map(\.name), ["bundle", "email", "app", "fields"])
     }
 
@@ -157,6 +166,54 @@ final class SupportUploaderTests: XCTestCase {
         guard case .refused(_, let reason) = refused else { return XCTFail("\(refused)") }
         XCTAssertTrue(reason.hasPrefix("Line one line two aaa"))
         XCTAssertEqual(reason.count, 300)
+    }
+
+    // MARK: - Whether sending is switched on
+
+    func testTheStatusIsAskedBeforeAnythingIsUploaded() async throws {
+        let transport = FakeTransport()
+        transport.answer = (Data(#"{"status":"check-email"}"#.utf8), HTTPResult(status: 202, url: endpoint))
+        let answer = await SupportUploader(site: site, transport: transport).send(try request())
+        XCTAssertEqual(answer, .sent)
+        XCTAssertEqual(transport.requests.map(\.httpMethod), ["GET", "POST"])
+        let status = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(status.url, URL(string: "https://tactilemac.com/api/support/status"))
+        XCTAssertEqual(status.timeoutInterval, 5)
+        XCTAssertNil(status.httpBody, "the status carries nothing of the report")
+    }
+
+    func testWhenSendingIsntSwitchedOnNothingIsUploaded() async throws {
+        let site = self.site
+        let notAvailable: [(Data, HTTPResult)] = [
+            (Data(#"{"available":false}"#.utf8), HTTPResult(status: 200, url: site.base.appendingPathComponent("api/support/status"))),
+            (Data(#"{"available":"yes"}"#.utf8), HTTPResult(status: 200, url: site.base.appendingPathComponent("api/support/status"))),
+            (Data("not json".utf8), HTTPResult(status: 200, url: site.base.appendingPathComponent("api/support/status"))),
+            (Data(#"{"available":true}"#.utf8), HTTPResult(status: 503, url: site.base.appendingPathComponent("api/support/status"))),
+            (Data(#"{"available":true}"#.utf8), HTTPResult(status: 404, url: site.base.appendingPathComponent("api/support/status"))),
+            (Data(#"{"available":true}"#.utf8), HTTPResult(status: 200, url: URL(string: "https://example.com/api/support/status"))),
+        ]
+        for status in notAvailable {
+            let transport = FakeTransport()
+            transport.status = status
+            let uploader = SupportUploader(site: site, transport: transport)
+            let available = await uploader.isAvailable()
+            XCTAssertFalse(available, "\(status.1.status) \(String(decoding: status.0, as: UTF8.self))")
+            let answer = await uploader.send(try request())
+            XCTAssertEqual(answer, .unavailable)
+            XCTAssertEqual(transport.uploads, [], "nothing is uploaded")
+        }
+
+        let timedOut = FakeTransport()
+        timedOut.statusFailure = URLError(.timedOut)
+        let answer = await SupportUploader(site: site, transport: timedOut).send(try request())
+        XCTAssertEqual(answer, .unavailable)
+        XCTAssertEqual(timedOut.uploads, [])
+    }
+
+    /// The switch can flip between the status and the upload: a 503 then is unavailable all the same.
+    func testA503AfterTheStatusSaidYesIsUnavailable() async throws {
+        let unavailable = try await answer(503, #"{"error":"support_unavailable"}"#)
+        XCTAssertEqual(unavailable, .unavailable)
     }
 
     func testANetworkFailureIsUnavailable() async throws {

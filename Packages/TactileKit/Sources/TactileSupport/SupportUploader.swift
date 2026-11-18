@@ -102,9 +102,9 @@ public enum SupportAnswer: Equatable, Sendable {
     case unavailable
 }
 
-/// POSTs a request, and gives back how it ended. A redirect is never followed.
+/// Makes a request, and gives back the body and how it ended. A redirect is never followed.
 public protocol SupportTransport: Sendable {
-    func post(_ request: URLRequest) async throws -> (Data, HTTPResult)
+    func perform(_ request: URLRequest) async throws -> (Data, HTTPResult)
 }
 
 /// URLSession, ephemeral: no cookies, no cache, and every redirect refused.
@@ -122,7 +122,7 @@ public final class URLSessionSupportTransport: SupportTransport, @unchecked Send
         session = URLSession(configuration: configuration)
     }
 
-    public func post(_ request: URLRequest) async throws -> (Data, HTTPResult) {
+    public func perform(_ request: URLRequest) async throws -> (Data, HTTPResult) {
         let (data, response) = try await session.data(for: request, delegate: NoRedirects())
         return (data, HTTPResult(status: (response as? HTTPURLResponse)?.statusCode ?? 0, url: response.url))
     }
@@ -137,11 +137,18 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Se
 
 /// Sends a report to `<site>/api/support/requests`.
 ///
+/// First it asks `GET <site>/api/support/status`, with a 5-second limit: only
+/// `{"available": true}`, from the site, lets the report go. Anything else (`{"available": false}`,
+/// another answer, an error, the limit) means sending isn't switched on, and nothing is uploaded.
+///
 /// The request is `multipart/form-data`, each part once: `bundle` (the zip, as the file
 /// `tactile-report.zip`), `email`, `note` (left out when empty), `app` (`{"version", "build"}`) and
 /// `fields` (`SupportFields`). The answer counts only when it comes from the site itself.
 public struct SupportUploader: Sendable {
     public static let path = "/api/support/requests"
+    public static let statusPath = "/api/support/status"
+    /// How long the status may take.
+    public static let statusSeconds: TimeInterval = 5
 
     public let site: UpdateSite
     private let transport: SupportTransport
@@ -154,13 +161,31 @@ public struct SupportUploader: Sendable {
         self.boundary = boundary
     }
 
-    public var url: URL {
+    public var url: URL { address(Self.path) }
+    public var statusURL: URL { address(Self.statusPath) }
+
+    private func address(_ path: String) -> URL {
         var components = URLComponents(url: site.base, resolvingAgainstBaseURL: false)!
-        components.path = Self.path
+        components.path = path
         return components.url!
     }
 
+    /// Whether the site takes reports now: `{"available": true}` with 200, from the site, within
+    /// `statusSeconds`. Asks nothing else and sends nothing of a report.
+    public func isAvailable() async -> Bool {
+        var request = URLRequest(url: statusURL, timeoutInterval: Self.statusSeconds)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, result) = try? await transport.perform(request), result.status == 200,
+              let from = result.url, site.isOnSite(from),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        return (object["available"] as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue } ?? false
+    }
+
+    /// Asks whether the site takes reports, and only then uploads.
     public func send(_ request: SupportRequest) async -> SupportAnswer {
+        guard await isAvailable() else { return .unavailable }
         let boundary = boundary()
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
@@ -168,7 +193,7 @@ public struct SupportUploader: Sendable {
         urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
         urlRequest.httpBody = Self.multipart(request, boundary: boundary)
         do {
-            let (data, result) = try await transport.post(urlRequest)
+            let (data, result) = try await transport.perform(urlRequest)
             guard let from = result.url, site.isOnSite(from) else { return .unavailable }
             return Self.answer(status: result.status, body: data)
         } catch {
