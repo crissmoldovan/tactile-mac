@@ -129,16 +129,29 @@ public enum SupportReport {
 
     // MARK: - Hex
 
+    private static let hexDigits = Array("0123456789abcdef".utf8)
+
     /// "05 0d 09 04 …", 16 bytes a line, each line ended.
     static func hexLines(_ bytes: [UInt8]) -> String {
-        stride(from: 0, to: bytes.count, by: 16).map { start in
-            bytes[start..<min(start + 16, bytes.count)].map { String(format: "%02x", $0) }.joined(separator: " ") + "\n"
-        }.joined()
+        var text: [UInt8] = []
+        text.reserveCapacity(bytes.count * 3)
+        for (index, byte) in bytes.enumerated() {
+            text.append(hexDigits[Int(byte >> 4)])
+            text.append(hexDigits[Int(byte & 0x0F)])
+            text.append(index % 16 == 15 || index == bytes.count - 1 ? UInt8(ascii: "\n") : UInt8(ascii: " "))
+        }
+        return String(decoding: text, as: UTF8.self)
     }
 
     /// "060aabab…".
     static func hex(_ bytes: [UInt8]) -> String {
-        bytes.map { String(format: "%02x", $0) }.joined()
+        var text: [UInt8] = []
+        text.reserveCapacity(bytes.count * 2)
+        for byte in bytes {
+            text.append(hexDigits[Int(byte >> 4)])
+            text.append(hexDigits[Int(byte & 0x0F)])
+        }
+        return String(decoding: text, as: UTF8.self)
     }
 
     /// The bytes of hex text, spaced or not; nil when it isn't hex.
