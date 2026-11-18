@@ -1,0 +1,33 @@
+# This project takes issues, not pull requests (CONTRIBUTING.md). A pull request opened by anyone
+# who isn't a collaborator gets one comment, with thanks, and is closed.
+#
+# It runs on pull_request_target, in this repository's context, so it never checks out, builds or
+# runs anything from the pull request: it reads only the event's number and author association.
+name: Close outside pull requests
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    name: close-outside-pull-requests
+    if: >-
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.author_association != 'MEMBER' &&
+      github.event.pull_request.author_association != 'COLLABORATOR'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Thank, and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          COMMENT: >-
+            Thanks! This project takes issues, not pull requests — please open an issue
+            describing the change; see CONTRIBUTING.md
+        run: gh pr close "$NUMBER" --comment "$COMMENT"

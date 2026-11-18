@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>Tactile app icon, option 3: Pinch</title>
+<defs>
+<clipPath id="t3-clip"><path d="M640.59 100C722.19 100 763 100 799.79 112.14L806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08L911.86 224.21C924 261 924 301.81 924 383.41L924 640.59C924 722.19 924 763 911.86 799.79L910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11L799.79 911.86C763 924 722.19 924 640.59 924L383.41 924C301.81 924 261 924 224.21 911.86L217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92L112.14 799.79C100 763 100 722.19 100 640.59L100 383.41C100 301.81 100 261 112.14 224.21L113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89L224.21 112.14C261 100 301.81 100 383.41 100Z"/></clipPath>
+<linearGradient id="t3-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFB84A"/><stop offset="1" stop-color="#F0532A"/></linearGradient>
+<linearGradient id="t3-bgu" gradientUnits="userSpaceOnUse" x1="0" y1="100" x2="0" y2="924"><stop offset="0" stop-color="#FFB84A"/><stop offset="1" stop-color="#F0532A"/></linearGradient>
+<radialGradient id="t3-sheen" cx="0.5" cy="0" r="0.85"><stop offset="0" stop-color="#fff" stop-opacity="0.22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+<linearGradient id="t3-rim" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.7"/><stop offset="0.45" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity="0.32"/></linearGradient>
+<filter id="t3-drop" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.26"/></filter>
+<filter id="t3-lift" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#7a2006" flood-opacity="0.35"/></filter>
+</defs>
+<path d="M640.59 100C722.19 100 763 100 799.79 112.14L806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08L911.86 224.21C924 261 924 301.81 924 383.41L924 640.59C924 722.19 924 763 911.86 799.79L910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11L799.79 911.86C763 924 722.19 924 640.59 924L383.41 924C301.81 924 261 924 224.21 911.86L217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92L112.14 799.79C100 763 100 722.19 100 640.59L100 383.41C100 301.81 100 261 112.14 224.21L113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89L224.21 112.14C261 100 301.81 100 383.41 100Z" fill="url(#t3-bg)" filter="url(#t3-drop)"/>
+<g clip-path="url(#t3-clip)">
+<rect x="100" y="100" width="824" height="824" fill="url(#t3-sheen)"/>
+<path d="M344 344A336 336 0 0 1 680 680" fill="none" stroke="#fff" stroke-opacity="0.72" stroke-width="92" stroke-linecap="round"/>
+<g filter="url(#t3-lift)"><circle cx="344" cy="344" r="118" fill="url(#t3-bgu)"/><circle cx="344" cy="344" r="118" fill="#fff" fill-opacity="0.62"/><circle cx="344" cy="344" r="103.84" fill="none" stroke="#fff" stroke-width="28.32"/></g>
+<g filter="url(#t3-lift)"><circle cx="680" cy="680" r="118" fill="url(#t3-bgu)"/><circle cx="680" cy="680" r="118" fill="#fff" fill-opacity="0.62"/><circle cx="680" cy="680" r="103.84" fill="none" stroke="#fff" stroke-width="28.32"/></g>
+</g>
+<path d="M640.59 100C722.19 100 763 100 799.79 112.14L806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08L911.86 224.21C924 261 924 301.81 924 383.41L924 640.59C924 722.19 924 763 911.86 799.79L910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11L799.79 911.86C763 924 722.19 924 640.59 924L383.41 924C301.81 924 261 924 224.21 911.86L217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92L112.14 799.79C100 763 100 722.19 100 640.59L100 383.41C100 301.81 100 261 112.14 224.21L113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89L224.21 112.14C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#t3-rim)" stroke-width="10" clip-path="url(#t3-clip)"/>
+</svg>

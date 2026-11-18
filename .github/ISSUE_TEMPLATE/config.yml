@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Download Tactile
+    url: https://tactilemac.com
+    about: The official build, signed and notarized, which updates itself.
+  - name: Report a security problem privately
+    url: https://github.com/crissmoldovan/tactile-mac/security/advisories/new
+    about: Please don't open a public issue for a security problem. See SECURITY.md.

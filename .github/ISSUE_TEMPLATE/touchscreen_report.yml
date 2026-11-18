@@ -1,0 +1,71 @@
+name: Touchscreen report
+description: How Tactile does with your touchscreen, whether it works or not.
+labels: [touchscreen]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Reports of touchscreens that work are as useful as those that don't: they tell others what to buy.
+  - type: input
+    id: model
+    attributes:
+      label: The touchscreen
+      description: Its make and model, and what it is (a monitor, a portable display, a panel in a kiosk…).
+      placeholder: ILITEK-TP, in a 15.6-inch portable display
+    validations:
+      required: true
+  - type: input
+    id: usb-id
+    attributes:
+      label: USB vendor:product ID
+      description: Four hex digits each, as `vendor:product`. How to find it is below.
+      placeholder: 222a:0001
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        **How to find the USB ID.** Any of these:
+        - Hold **Option** and choose **Apple menu › System Information**. Under **Hardware › USB**, select the touchscreen: "Vendor ID" is the first part and "Product ID" the second (`0x222a` and `0x0001` make `222a:0001`).
+        - In Tactile, **Copy diagnostics** in General: the touchscreen's line starts `USB vendor:product`.
+        - From the source: `swift run --package-path Tools/tactile-probe tactile-probe list`.
+
+        Please leave out the serial number.
+  - type: dropdown
+    id: works
+    attributes:
+      label: Does it work?
+      options:
+        - Yes, every gesture I tried
+        - Partly
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: what-works
+    attributes:
+      label: What works, and what doesn't
+      description: Taps, one-finger drag or scroll, two-finger scroll, pinch, rotate, swipes, palm rejection. Does it give one finger or several? Did set-up find it?
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: macOS version and Mac model
+      placeholder: macOS 26.1 on a Mac mini (M4)
+    validations:
+      required: true
+  - type: input
+    id: tactile-version
+    attributes:
+      label: Tactile version
+      placeholder: 0.7.0 (501)
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics (optional)
+      description: |
+        **Copy diagnostics** in General, pasted here. **Remove the serial numbers first**: they follow the word "serial".
+      render: text

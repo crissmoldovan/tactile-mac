@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Refuses a push that carries a commit crediting an AI tool, so a commit made
+# with --no-verify (or amended or rebased that way) is still caught before it
+# leaves this machine. See CONTRIBUTING.md.
+#
+# Git passes the remote's name and URL, and one line per ref on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+
+set -euo pipefail
+
+remote=$1
+here="$(cd "$(dirname "$0")" && pwd)"
+check="$here/../scripts/check-attribution.sh"
+status=0
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  # Deleting a ref, or pushing something that isn't a commit: nothing to check.
+  if [[ $local_sha =~ ^0+$ ]]; then continue; fi
+  if ! git cat-file -e "$local_sha^{commit}" 2>/dev/null; then continue; fi
+
+  if [[ ! $remote_sha =~ ^0+$ ]] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    # An update: the commits the remote doesn't have yet.
+    range="$remote_sha..$local_sha"
+  else
+    # A new branch (or one whose remote tip isn't here): the commits that
+    # aren't on the remote's main branch. With no main branch known, all of
+    # them.
+    range=$local_sha
+    for base in "refs/remotes/$remote/main" "refs/remotes/$remote/HEAD"; do
+      if git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+        range="$base..$local_sha"
+        break
+      fi
+    done
+  fi
+
+  "$check" --range "$range" || status=$?
+done
+
+exit "$status"

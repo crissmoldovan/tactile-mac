@@ -1,0 +1,55 @@
+# Tests TactileKit and builds the app as anyone can: signed ad hoc, with no certificate, no secret
+# and nothing released. Official releases are made on the maintainer's Mac (Tools/RELEASING.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: test
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Show the toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Test TactileKit
+        run: swift test --package-path Packages/TactileKit
+
+  build:
+    name: build
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Show the toolchain
+        run: xcodebuild -version
+
+      - name: Build the app (Debug, signed ad hoc)
+        run: |
+          xcodebuild -project Tactile.xcodeproj -scheme Tactile -configuration Debug \
+            -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/DerivedData" build
+          codesign -dvv "$RUNNER_TEMP/DerivedData/Build/Products/Debug/Tactile.app" 2>&1 | grep -E '^(Identifier|Signature|TeamIdentifier)='

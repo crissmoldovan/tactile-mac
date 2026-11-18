@@ -1,0 +1,82 @@
+# Refuses commits and pull requests that credit an AI tool (a co-author
+# trailer, "Generated with", and the rest listed in
+# scripts/check-attribution.sh). The job is named no-agent-attribution so it
+# can be made a required status check. A second job runs the check's own
+# tests. See CONTRIBUTING.md.
+name: No agent attribution
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  no-agent-attribution:
+    name: no-agent-attribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check every commit in the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/check-attribution.sh --range "$BASE_SHA..$HEAD_SHA"
+
+      - name: Check the pull request title and description
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pull-request.txt"
+          scripts/check-attribution.sh --text-file "$RUNNER_TEMP/pull-request.txt"
+
+      - name: Check the pushed commits
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          if [[ $AFTER =~ ^0+$ ]]; then
+            echo "The branch was deleted; nothing to check."
+            exit 0
+          fi
+          if [[ $BEFORE =~ ^0+$ ]] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            # A new branch, or a force push whose old tip is gone: check the
+            # commits that aren't already on main. The first push of main
+            # itself has no main to compare with: check all its history.
+            if git rev-parse --verify --quiet origin/main >/dev/null && [[ $GITHUB_REF != refs/heads/main ]]; then
+              range="origin/main..$AFTER"
+            else
+              range="$AFTER"
+            fi
+          else
+            range="$BEFORE..$AFTER"
+          fi
+          scripts/check-attribution.sh --range "$range"
+
+  attribution-tests:
+    name: attribution-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test the attribution check and its hooks
+        run: scripts/check-attribution-tests.sh

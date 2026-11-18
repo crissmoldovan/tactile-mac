@@ -1,0 +1,21 @@
+// Where the official build asks for updates, and the update keys it trusts. They go into its
+// Info.plist (Tactile/Info.plist: TactileUpdateBaseURL and TactileUpdateKeys), and the updater reads
+// them from there. Signing.xcconfig includes this file before Signing.local.xcconfig, so a Mac's local
+// file can override them.
+//
+// In an xcconfig "//" starts a comment, so a "//" in a value is written "/$()/" ($() expands to
+// nothing): the site below is https://tactilemac.com.
+//
+// TACTILE_UPDATE_BASE_URL: an https origin, https://host[:port], with no path. Anything else, if set,
+// turns updates off.
+// TACTILE_UPDATE_KEYS: <keyId>:<base64 of the 32-byte Ed25519 public key>, several separated by
+// spaces, each keyId once. One bad entry turns updates off. A new key goes beside the old ones, here
+// and in UpdateTrust.productionKeys (Tools/RELEASING.md, "The update key").
+//
+// Only the official build updates itself (bundle identifier com.crissmoldovan.tactile, signed with the
+// Developer ID of team 75K3LTUM8A). A fork that wants updates of its own sets its own site and keys
+// here, and changes OfficialBuild and SecurityCodeSignatureCheck.developerIDRequirement in
+// Packages/TactileKit/Sources/TactileUpdates to its own bundle identifier and team.
+
+TACTILE_UPDATE_BASE_URL = https:/$()/tactilemac.com
+TACTILE_UPDATE_KEYS = k1:IpKoBBLRNGZ8WqpbNod6gXQdjESJc0xYOjHdBUwbxYI=

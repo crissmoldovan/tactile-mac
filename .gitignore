@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# A Mac's own signing settings, never committed (see Config/Signing.xcconfig)
+Config/Signing.local.xcconfig

@@ -1,0 +1,389 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A7C1000000000000000000B3 /* TactileApp in Frameworks */ = {isa = PBXBuildFile; productRef = A7C1000000000000000000C3 /* TactileApp */; };
+		A7C1000000000000000000E2 /* TactileMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C1000000000000000000E1 /* TactileMain.swift */; };
+		7052F432298D2D280066014F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7052F431298D2D280066014F /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A7C1000000000000000000E1 /* TactileMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TactileMain.swift; sourceTree = "<group>"; };
+		A7C1000000000000000000A1 /* TactileKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Packages/TactileKit; sourceTree = "<group>"; };
+		7052F42C298D2D280066014F /* Tactile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tactile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7052F431298D2D280066014F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		7052F436298D2D280066014F /* Tactile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Tactile.entitlements; sourceTree = "<group>"; };
+		A7C1000000000000000000F1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A7C1000000000000000000F3 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
+		A7C1000000000000000000F4 /* Updates.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Updates.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7052F429298D2D280066014F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A7C1000000000000000000B3 /* TactileApp in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		7052F423298D2D280066014F = {
+			isa = PBXGroup;
+			children = (
+				7052F42E298D2D280066014F /* Tactile */,
+				A7C1000000000000000000F2 /* Config */,
+				A7C1000000000000000000A1 /* TactileKit */,
+				7052F42D298D2D280066014F /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A7C1000000000000000000F2 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				A7C1000000000000000000F3 /* Signing.xcconfig */,
+				A7C1000000000000000000F4 /* Updates.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		7052F42D298D2D280066014F /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7052F42C298D2D280066014F /* Tactile.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7052F42E298D2D280066014F /* Tactile */ = {
+			isa = PBXGroup;
+			children = (
+				A7C1000000000000000000E1 /* TactileMain.swift */,
+				7052F431298D2D280066014F /* Assets.xcassets */,
+				7052F436298D2D280066014F /* Tactile.entitlements */,
+				A7C1000000000000000000F1 /* Info.plist */,
+			);
+			path = Tactile;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7052F42B298D2D280066014F /* Tactile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7052F439298D2D280066014F /* Build configuration list for PBXNativeTarget "Tactile" */;
+			buildPhases = (
+				7052F428298D2D280066014F /* Sources */,
+				7052F429298D2D280066014F /* Frameworks */,
+				7052F42A298D2D280066014F /* Resources */,
+				A7C1000000000000000000F5 /* Warn When Signed Ad Hoc */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Tactile;
+			productName = Tactile;
+			packageProductDependencies = (
+				A7C1000000000000000000C3 /* TactileApp */,
+			);
+			productReference = 7052F42C298D2D280066014F /* Tactile.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7052F424298D2D280066014F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1420;
+				LastUpgradeCheck = 2640;
+				TargetAttributes = {
+					7052F42B298D2D280066014F = {
+						CreatedOnToolsVersion = 14.2;
+					};
+				};
+			};
+			buildConfigurationList = 7052F427298D2D280066014F /* Build configuration list for PBXProject "Tactile" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 7052F423298D2D280066014F;
+			productRefGroup = 7052F42D298D2D280066014F /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				7052F42B298D2D280066014F /* Tactile */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		7052F42A298D2D280066014F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7052F432298D2D280066014F /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A7C1000000000000000000F5 /* Warn When Signed Ad Hoc */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Warn When Signed Ad Hoc";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Config/Signing.xcconfig signs ad hoc unless Config/Signing.local.xcconfig says otherwise.\nif [ \"${CODE_SIGN_IDENTITY}\" = \"-\" ]; then\n    echo \"warning: Built ad hoc: Accessibility and Input Monitoring will be asked for again. Add Config/Signing.local.xcconfig.\"\nfi\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7052F428298D2D280066014F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A7C1000000000000000000E2 /* TactileMain.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		7052F437298D2D280066014F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		7052F438298D2D280066014F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		7052F43A298D2D280066014F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A7C1000000000000000000F3 /* Signing.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Tactile/Tactile.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tactile/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Cristian Moldovan. GPL-3.0. Inspired by Touch Up, Copyright (c) 2024 Sebastian Hueber, MIT licence.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.6.2;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.crissmoldovan.tactile";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7052F43B298D2D280066014F /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A7C1000000000000000000F3 /* Signing.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Tactile/Tactile.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tactile/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Cristian Moldovan. GPL-3.0. Inspired by Touch Up, Copyright (c) 2024 Sebastian Hueber, MIT licence.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.6.2;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.crissmoldovan.tactile";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		7052F427298D2D280066014F /* Build configuration list for PBXProject "Tactile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7052F437298D2D280066014F /* Debug */,
+				7052F438298D2D280066014F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7052F439298D2D280066014F /* Build configuration list for PBXNativeTarget "Tactile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7052F43A298D2D280066014F /* Debug */,
+				7052F43B298D2D280066014F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A7C1000000000000000000C3 /* TactileApp */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TactileApp;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 7052F424298D2D280066014F /* Project object */;
+}

@@ -1,0 +1,36 @@
+// How builds of Tactile from this project are signed: the base configuration of the Tactile target,
+// in Debug and Release.
+//
+// By default, ad hoc ("Sign to Run Locally"), so anyone can build Tactile, with no Apple account or
+// certificate. An ad hoc signature changes with every build: macOS then asks again for
+// Accessibility and Input Monitoring (remove Tactile from both lists in System Settings › Privacy &
+// Security, and add it again). A build signed ad hoc never updates itself: only the official build
+// does.
+//
+// To sign your own builds with a certificate, write your settings into Signing.local.xcconfig,
+// beside this file. Git ignores it, and it is read last, so what it sets wins. With a Developer ID:
+//
+//     CODE_SIGN_STYLE = Manual
+//     CODE_SIGN_IDENTITY = Developer ID Application
+//     DEVELOPMENT_TEAM = <your team ID>
+//     PROVISIONING_PROFILE_SPECIFIER =
+//
+// or with Xcode's automatic signing and your Apple Development certificate:
+//
+//     CODE_SIGN_STYLE = Automatic
+//     CODE_SIGN_IDENTITY = Apple Development
+//     DEVELOPMENT_TEAM = <your team ID>
+//
+// Tools/release.sh and install.sh give xcodebuild their signing settings themselves, and
+// depend on neither file. A build signed ad hoc says so with a warning.
+//
+// Updates.xcconfig, included first, holds the update site and keys; the local file can override them.
+
+#include "Updates.xcconfig"
+
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+PROVISIONING_PROFILE_SPECIFIER =
+
+#include? "Signing.local.xcconfig"

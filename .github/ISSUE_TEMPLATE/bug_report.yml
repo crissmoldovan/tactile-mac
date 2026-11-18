@@ -1,0 +1,61 @@
+name: Bug report
+description: Tactile did something wrong, or didn't do something it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting it. Please check the [open issues](https://github.com/crissmoldovan/tactile-mac/issues) first, in case it is known.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what Tactile did, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: The steps, as exactly as you can. Say if it happens every time or only sometimes.
+      placeholder: |
+        1. Set up the touchscreen on the display on the left.
+        2. Pinch in Safari.
+        3. The page scrolls instead of zooming.
+    validations:
+      required: true
+  - type: input
+    id: tactile-version
+    attributes:
+      label: Tactile version
+      description: In General, in Settings. Say if you built it from source.
+      placeholder: 0.7.0 (501), downloaded from tactilemac.com
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: macOS version and Mac model
+      placeholder: macOS 26.1 on a MacBook Pro 14-inch (M3)
+    validations:
+      required: true
+  - type: input
+    id: touchscreen
+    attributes:
+      label: The touchscreen
+      description: Its make and model, and its USB vendor:product ID if you know it.
+      placeholder: ILITEK-TP, 222a:0001
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        In Settings, General, click **Copy** beside "Copy diagnostics", and paste it here. **Remove the serial numbers first**: they follow the word "serial".
+      render: text
+  - type: textarea
+    id: log
+    attributes:
+      label: Log (optional)
+      description: |
+        If it helps, what Tactile logged around the time: `/usr/bin/log show --last 10m --info --predicate 'subsystem == "com.crissmoldovan.tactile"'`
+      render: text

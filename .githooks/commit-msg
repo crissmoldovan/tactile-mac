@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Refuses a commit message that credits an AI tool. Git passes the path of
+# the message being written. See CONTRIBUTING.md.
+
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+exec "$here/../scripts/check-attribution.sh" --message-file "$1"
