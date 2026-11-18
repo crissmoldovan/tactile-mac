@@ -421,10 +421,12 @@ final class LivingOnTheMacModelTests: XCTestCase {
         case .closeGestureTester: return 35
         case .setGestureTesterPerformsSwipes: return 36
         case .clearGestureTester: return 37
+        case .beginSupportCheck: return 38
+        case .endSupportCheck: return 39
         }
     }
 
-    private static let appCommandCases = 38
+    private static let appCommandCases = 40
 
     /// The final review's item 4: nothing asks macOS to launch Tactile at login but the switch.
     /// Whatever the system says of it, the conditions see no request after `start`, nor after one of
@@ -443,6 +445,7 @@ final class LivingOnTheMacModelTests: XCTestCase {
             .setRecordsFrames(false), .copyDiagnostics, .setSwipesFollowFingers(true), .openLoginItemsSettings,
             .beginSetUpMode, .setUpChoose(displayID: Desk.hdmi.displayID), .setUpBack,
             .openGestureTester(ilitek), .setGestureTesterPerformsSwipes(true), .clearGestureTester, .closeGestureTester,
+            .beginSupportCheck(ilitek), .endSupportCheck,
         ]
         XCTAssertEqual(Set(commands.map(Self.caseIndex)),
                        Set(0..<Self.appCommandCases).subtracting([Self.caseIndex(.setLaunchAtLogin(true))]),

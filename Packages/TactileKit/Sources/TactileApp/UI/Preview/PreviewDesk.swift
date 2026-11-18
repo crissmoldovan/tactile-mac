@@ -276,6 +276,9 @@ struct PreviewDesk: Equatable, Sendable {
             applySetUpMode(command, at: now)
         case .openGestureTester, .closeGestureTester, .setGestureTesterPerformsSwipes, .clearGestureTester:
             applyTester(command, at: now)
+        case .beginSupportCheck, .endSupportCheck:
+            // The preview has no devices to check.
+            break
         }
     }
 

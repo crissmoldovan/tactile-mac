@@ -260,6 +260,17 @@ public final class TactileModel: AppModel, TouchscreenSourceDelegate {
             return
         case .openGestureTester, .closeGestureTester, .setGestureTesterPerformsSwipes, .clearGestureTester:
             performGestureTester(command)
+        case .beginSupportCheck(let id):
+            guard inputs.setUp == nil, setUp == nil, setUpMode == nil else {
+                ModelLog.model.info("The touchscreen check of \(id.rawValue, privacy: .public) can't begin while a set-up runs")
+                return
+            }
+            ModelLog.model.info("The touchscreen check has \(id.rawValue, privacy: .public): letting it go until the check ends")
+            inputs.supportCheck = id
+        case .endSupportCheck:
+            guard let id = inputs.supportCheck else { return }
+            ModelLog.model.info("The touchscreen check let \(id.rawValue, privacy: .public) go: taking it back")
+            inputs.supportCheck = nil
         default:
             break
         }
