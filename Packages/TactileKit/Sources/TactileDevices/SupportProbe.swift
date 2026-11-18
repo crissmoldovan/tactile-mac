@@ -131,7 +131,9 @@ public struct SupportRawReport: Equatable, Sendable {
 /// - **Unplugging.** When the touch interface goes (or, with none, the last listened interface),
 ///   the device has gone: everything still open is closed and nothing is written. When another of
 ///   its interfaces goes, the take ends as a release does, 0 written to the touch interface if this
-///   take wrote a 2, best effort. Either way `onGone` is called with what was written.
+///   take wrote a 2, best effort. Either way `onGone` is called with what was written. During a
+///   read, the closing waits for the read, as a release and a stop do: the probe keeps track of the
+///   read in flight itself, even once the take has ended.
 /// - Every step is written in the log book (`DeviceLogBook`), keyed by `SupportDevice.logKey`.
 ///
 /// The touchscreen source must have let the device go first (the model releases a touchscreen while
@@ -154,6 +156,9 @@ public final class SupportProbe {
     /// `stop()` came while a read was under way: it is finished when the read returns, so no device
     /// is closed, nor the matching stopped, under a request still in flight.
     private var stopAfterRead = false
+    /// The take whose read is in flight now, whether or not it is still the device taken (one of its
+    /// interfaces may have gone meanwhile): nothing of it is closed until the read returns.
+    private var readInFlight: Taken?
 
     /// The device taken now.
     private final class Taken {
@@ -210,8 +215,8 @@ public final class SupportProbe {
     /// about 5 s): nothing blocks meanwhile.
     public func stop() {
         guard isStarted else { return }
-        if let taken, taken.isReading {
-            taken.releaseAfterRead = true
+        if let reading = readInFlight {
+            reading.releaseAfterRead = true
             stopAfterRead = true
             return
         }
@@ -264,7 +269,9 @@ public final class SupportProbe {
             // GET, then SET, as the source does (as Linux does).
             for report in interfaces[touch.id]?.decoder?.featureReportsToRead ?? [] {
                 taken.isReading = true
+                readInFlight = taken
                 let read = await system.readFeatureReportInBackground(touch.id, reportID: report.reportID, length: report.length)
+                readInFlight = nil
                 taken.isReading = false
                 guard stillTaking(taken) else { return nil }
                 let recorded = SupportSwitches.FeatureRead(
@@ -398,7 +405,15 @@ public final class SupportProbe {
             let hasGone = device.touchInterface.map { $0.id == id }
                 ?? !device.listenedOnly.contains { interfaces[$0.id] != nil }
             let writeBack: SupportSwitches.ModeWrite?
-            if hasGone {
+            if taken.isReading {
+                // A read is in flight: everything is closed when it returns, nothing written to a
+                // touch interface that has gone, and nothing has been written yet.
+                taken.releaseAfterRead = true
+                writeBack = nil
+                log.info("Support check of \(device.usbID, privacy: .public): an interface went during a read; letting go when it returns")
+                note(device, hasGone ? "it was unplugged during a read; letting go when it returns"
+                     : "one of its interfaces went during a read; letting the rest go when it returns")
+            } else if hasGone {
                 // Unplugged. Nothing is written to a device that has gone.
                 for open in taken.open {
                     system.stopReports(open.id)
@@ -412,8 +427,7 @@ public final class SupportProbe {
                 // One interface went and the rest stays: let it go as a release does, best effort.
                 log.info("Support check of \(device.usbID, privacy: .public): one of its interfaces went; letting the rest go")
                 note(device, "its \(device.interfaces.first { $0.id == id }?.role.rawValue ?? "other") interface went; letting the rest go")
-                writeBack = taken.isReading ? nil : close(taken, writingBack: true)
-                if taken.isReading { taken.releaseAfterRead = true }
+                writeBack = close(taken, writingBack: true)
             }
             taken.onGone(writeBack)
         }

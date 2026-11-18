@@ -369,4 +369,43 @@ final class SupportProbeTests: XCTestCase {
         XCTAssertFalse(system.calls.contains { if case .writeInputMode = $0 { return true } else { return false } })
         XCTAssertEqual(probe.devices, [], "and it lists nothing more")
     }
+
+    /// One interface goes during a read, then the probe is stopped: still nothing is closed and the
+    /// matching isn't stopped until the read returns.
+    func testAStopAfterAnInterfaceWentDuringAReadStillWaitsForIt() async throws {
+        let (system, probe) = make(try SupportDesk.all())
+        system.suspendsReads = true
+        probe.start()
+        let device = try device(probe, "27c0:0859")
+        let taking = Task { @MainActor in await probe.take(device, onReport: { _ in }, onGone: { _ in }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        system.clearCalls()
+        system.disconnect(SupportDesk.stripMouseID)
+        probe.stop()
+        XCTAssertFalse(system.calls.contains { call in
+            if case .close = call { return true }
+            return call == .stopMatching
+        }, "nothing closed under the read in flight: \(system.calls)")
+        system.resumeReads()
+        _ = await taking.value
+        XCTAssertEqual(system.calls.last, .stopMatching)
+        XCTAssertTrue(system.calls.contains(.close(SupportDesk.stripTouchID, exclusive: true)))
+    }
+
+    /// The touch interface itself unplugged during a read: what is left is closed once the read returns.
+    func testTheTouchInterfaceGoingDuringAReadClosesAfterIt() async throws {
+        let (system, probe) = make(try SupportDesk.all())
+        system.suspendsReads = true
+        probe.start()
+        let device = try device(probe, "27c0:0859")
+        let taking = Task { @MainActor in await probe.take(device, onReport: { _ in }, onGone: { _ in }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        system.clearCalls()
+        system.disconnect(SupportDesk.stripTouchID)
+        XCTAssertFalse(system.calls.contains { if case .close = $0 { return true } else { return false } })
+        system.resumeReads()
+        _ = await taking.value
+        XCTAssertTrue(system.calls.contains(.close(SupportDesk.stripMouseID, exclusive: true)))
+        XCTAssertFalse(system.calls.contains { if case .writeInputMode = $0 { return true } else { return false } })
+    }
 }
