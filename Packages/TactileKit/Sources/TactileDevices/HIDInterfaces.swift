@@ -39,6 +39,10 @@ struct HIDInterfaceDescription: Equatable, Sendable {
     var descriptor: [UInt8]?
     /// IOKit's largest input report size, when it gives one.
     var maxInputReportSize: Int?
+    /// The manufacturer's name as reported; empty when there is none.
+    var manufacturer: String = ""
+    /// IOKit says it is built into the Mac, as a MacBook's trackpad is.
+    var isBuiltIn = false
 }
 
 /// One HID interface the device layer knows of, with its decoder.

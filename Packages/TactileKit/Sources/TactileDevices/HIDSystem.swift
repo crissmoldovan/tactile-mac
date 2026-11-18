@@ -7,10 +7,10 @@ import IOKit
 /// The HID system, as the touchscreen source uses it. Everything runs on the main thread.
 @MainActor
 protocol HIDSystem: AnyObject {
-    /// Starts watching for touchscreen interfaces (a Touch Screen collection, 0x0D/0x04) and mouse
-    /// interfaces (a Mouse collection, 0x01/0x02). Calls `matched` before returning for each one
-    /// connected now, then once for each that connects later, and `removed` once for each that
-    /// goes. Opens nothing.
+    /// Starts watching for the interfaces it was made to watch (`HIDMatching`): for the touchscreen
+    /// source, touchscreen interfaces (a Touch Screen collection, 0x0D/0x04) and mouse interfaces (a
+    /// Mouse collection, 0x01/0x02). Calls `matched` before returning for each one connected now,
+    /// then once for each that connects later, and `removed` once for each that goes. Opens nothing.
     func startMatching(matched: @escaping @MainActor (HIDInterfaceDescription) -> Void,
                        removed: @escaping @MainActor (HIDInterfaceID) -> Void)
     /// Stops watching, and forgets every interface.
@@ -26,8 +26,9 @@ protocol HIDSystem: AnyObject {
     /// Whether the interface has the Input Mode feature (0x0D/0x52). Asked while it is open.
     func hasInputMode(_ id: HIDInterfaceID) -> Bool
     /// Reads one whole feature report (GET_REPORT), asking for exactly `length` bytes (the report
-    /// ID byte included when the interface uses IDs), and drops what comes back: for the panels
-    /// that need it, the read itself is what matters. Asked while the interface is open.
+    /// ID byte included when the interface uses IDs), and gives back what came back. The touchscreen
+    /// source drops it: for the panels that need it, the read itself is what matters. The support
+    /// check records it. Asked while the interface is open.
     func readFeatureReport(_ id: HIDInterfaceID, reportID: Int, length: Int) -> FeatureReportRead
     /// Writes the Input Mode feature: 0 mouse emulation, 2 multi-touch. Never reads it.
     func writeInputMode(_ id: HIDInterfaceID, _ value: Int) -> IOReturn
@@ -45,6 +46,9 @@ struct FeatureReportRead: Equatable, Sendable {
     var length: Int
     /// How long the read took, in seconds.
     var seconds: TimeInterval
+    /// The bytes that came back, the report ID byte first when the interface uses IDs: `length` of
+    /// them, none when the read failed.
+    var bytes: [UInt8] = []
 }
 
 /// IOKit result codes the device layer names. Swift can't import IOKit's macros for these.

@@ -8,8 +8,37 @@ import Foundation
 import IOKit
 import IOKit.hid
 
+/// Which HID interfaces a system watches.
+enum HIDMatching: Sendable {
+    /// Touchscreen interfaces (a Touch Screen collection, 0x0D/0x04) and mouse interfaces (a Mouse
+    /// collection, 0x01/0x02): the touchscreen source's.
+    case touchscreensAndMice
+    /// Every interface on the Digitizer page (0x0D), and pointer and mouse interfaces (0x01/0x01,
+    /// 0x01/0x02): the support check's, which lists digitisers Tactile doesn't drive and touchscreens
+    /// that are only a mouse. Watching opens nothing.
+    case supportCheck
+
+    /// IOHIDManager's matching dictionaries.
+    var criteria: [[String: Int]] {
+        switch self {
+        case .touchscreensAndMice:
+            return [
+                [kIOHIDDeviceUsagePageKey: 0x0D, kIOHIDDeviceUsageKey: 0x04],  // Touch Screen
+                [kIOHIDDeviceUsagePageKey: 0x01, kIOHIDDeviceUsageKey: 0x02],  // Mouse
+            ]
+        case .supportCheck:
+            return [
+                [kIOHIDDeviceUsagePageKey: 0x0D],                              // any digitiser
+                [kIOHIDDeviceUsagePageKey: 0x01, kIOHIDDeviceUsageKey: 0x01],  // Pointer
+                [kIOHIDDeviceUsagePageKey: 0x01, kIOHIDDeviceUsageKey: 0x02],  // Mouse
+            ]
+        }
+    }
+}
+
 @MainActor
 final class IOKitHIDSystem: HIDSystem {
+    private let matching: HIDMatching
     private var manager: IOHIDManager?
     /// What the manager's callbacks find the system through. It lives as long as the system.
     private let context = ManagerContext()
@@ -24,7 +53,8 @@ final class IOKitHIDSystem: HIDSystem {
     private var matched: (@MainActor (HIDInterfaceDescription) -> Void)?
     private var removed: (@MainActor (HIDInterfaceID) -> Void)?
 
-    init() {
+    init(matching: HIDMatching = .touchscreensAndMice) {
+        self.matching = matching
         context.system = self
     }
 
@@ -45,11 +75,7 @@ final class IOKitHIDSystem: HIDSystem {
         // The manager is never opened: IOHIDManagerOpen would open every matched interface, every
         // mouse on the Mac included. Each interface is opened by itself, and only when taken.
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        let criteria: [[String: Int]] = [
-            [kIOHIDDeviceUsagePageKey: 0x0D, kIOHIDDeviceUsageKey: 0x04],  // Touch Screen
-            [kIOHIDDeviceUsagePageKey: 0x01, kIOHIDDeviceUsageKey: 0x02],  // Mouse
-        ]
-        IOHIDManagerSetDeviceMatchingMultiple(manager, criteria as CFArray)
+        IOHIDManagerSetDeviceMatchingMultiple(manager, matching.criteria as CFArray)
         let pointer = Unmanaged.passUnretained(context).toOpaque()
         IOHIDManagerRegisterDeviceMatchingCallback(manager, deviceMatchedCallback, pointer)
         IOHIDManagerRegisterDeviceRemovalCallback(manager, deviceRemovedCallback, pointer)
@@ -145,7 +171,7 @@ final class IOKitHIDSystem: HIDSystem {
         let result = IOHIDDeviceGetReport(device, kIOHIDReportTypeFeature, CFIndex(reportID), &buffer, &reportLength)
         let seconds = ProcessInfo.processInfo.systemUptime - start
         let returned = result == kIOReturnSuccess ? min(max(Int(reportLength), 0), length) : 0
-        return FeatureReportRead(result: result, length: returned, seconds: seconds)
+        return FeatureReportRead(result: result, length: returned, seconds: seconds, bytes: Array(buffer.prefix(returned)))
     }
 
     /// The HID stack builds the whole feature report, keeping its other fields (such as Device
@@ -223,7 +249,9 @@ final class IOKitHIDSystem: HIDSystem {
             serial: property(kIOHIDSerialNumberKey) ?? "", product: property(kIOHIDProductKey) ?? "",
             usages: usages,
             descriptor: descriptor.map { [UInt8]($0) },
-            maxInputReportSize: property(kIOHIDMaxInputReportSizeKey))
+            maxInputReportSize: property(kIOHIDMaxInputReportSizeKey),
+            manufacturer: property(kIOHIDManufacturerKey) ?? "",
+            isBuiltIn: property(kIOHIDBuiltInKey) ?? false)
     }
 }
 
