@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "TactileDevices", targets: ["TactileDevices"]),
         .library(name: "TactileApp", targets: ["TactileApp"]),
         .library(name: "TactileUpdates", targets: ["TactileUpdates"]),
+        .library(name: "TactileSupport", targets: ["TactileSupport"]),
     ],
     targets: [
         .target(name: "TactileGestures"),
@@ -21,11 +22,13 @@ let package = Package(
         .target(name: "TactileDevices", dependencies: ["TactileReading", "TactileScreens"]),
         // Tactile's updater: asking tactilemac.com, checking an update, replacing the app. No interface.
         .target(name: "TactileUpdates"),
+        // The touchscreen check's report: its files, the zip, and sending it to tactilemac.com. No interface.
+        .target(name: "TactileSupport", dependencies: ["TactileDevices", "TactileReading", "TactileUpdates"]),
         .target(
             name: "TactileApp",
             dependencies: [
                 "TactileGestures", "TactileReading", "TactileScreens", "TactileOutput", "TactileDevices",
-                "TactileUpdates",
+                "TactileUpdates", "TactileSupport",
             ]
         ),
         .executableTarget(name: "tactile-devices-check", dependencies: ["TactileDevices"]),
@@ -43,10 +46,14 @@ let package = Package(
             name: "TactileAppTests",
             dependencies: [
                 "TactileApp", "TactileGestures", "TactileReading", "TactileScreens", "TactileOutput",
-                "TactileDevices", "TactileUpdates", "TactileTestSupport",
+                "TactileDevices", "TactileUpdates", "TactileSupport", "TactileTestSupport",
             ]
         ),
         .testTarget(name: "TactileUpdatesTests", dependencies: ["TactileUpdates"]),
+        .testTarget(
+            name: "TactileSupportTests",
+            dependencies: ["TactileSupport", "TactileDevices", "TactileReading", "TactileUpdates", "TactileTestSupport"]
+        ),
         // The survey's takes, replayed through reader, mapping, contact filter and engine together.
         .testTarget(
             name: "TactileReplayTests",

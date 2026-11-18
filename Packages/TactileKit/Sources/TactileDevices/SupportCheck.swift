@@ -23,14 +23,14 @@ public enum SupportStepEnding: String, Codable, Sendable {
     case stopped
 }
 
-/// The check's verdict.
+/// The check's verdict. Its raw values are the words tactilemac.com takes in a request's `fields`.
 public enum SupportVerdict: String, Codable, Sendable, CaseIterable {
-    /// Several fingers at once, through its touch interface.
-    case worksFully = "works-fully"
-    /// One finger at a time: from its touch interface, or as a mouse.
-    case worksWithOneFinger = "works-with-one-finger"
-    /// Nothing came, or nothing Tactile could read a touch from.
-    case doesNotWork = "doesnt-work"
+    /// Works fully: several fingers at once, through its touch interface.
+    case worksFully = "full"
+    /// Works with one finger: one at a time, from its touch interface, or as a mouse.
+    case worksWithOneFinger = "one-finger"
+    /// Doesn't work: nothing came, or nothing Tactile could read a touch from.
+    case doesNotWork = "none"
 }
 
 /// Why the verdict is what it is, for its one sentence.
@@ -144,7 +144,7 @@ public struct SupportIdentity: Equatable, Sendable {
 
     public var touch: Interface? { interfaces.first { $0.role == .touch } }
 
-    init(_ device: SupportDevice) {
+    public init(_ device: SupportDevice) {
         interfaces = device.interfaces.map { interface in
             let decoder = interface.descriptor.flatMap(InterfaceDecoder.init(descriptor:))
             return Interface(
@@ -427,7 +427,7 @@ public final class SupportCheck {
     /// - **works with one finger**: else, some step read a finger, from the touch interface or from a
     ///   mouse interface (a mouse-only device's pointer included);
     /// - **doesn't work**: else; reports came that gave no finger, or none came at all.
-    public static func verdict(of steps: [SupportTouchStep]) -> (verdict: SupportVerdict, reason: SupportVerdictReason) {
+    nonisolated public static func verdict(of steps: [SupportTouchStep]) -> (verdict: SupportVerdict, reason: SupportVerdictReason) {
         if steps.contains(where: { $0.mostFingersFromTouchInterface >= 2 }) { return (.worksFully, .severalFingersFromTouchInterface) }
         if steps.contains(where: { $0.mostFingersFromTouchInterface >= 1 }) { return (.worksWithOneFinger, .oneFingerFromTouchInterface) }
         if steps.contains(where: { $0.mostFingersFromMouseInterface >= 1 }) { return (.worksWithOneFinger, .oneFingerFromMouseInterface) }

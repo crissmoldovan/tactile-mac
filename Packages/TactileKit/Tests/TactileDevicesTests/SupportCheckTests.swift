@@ -298,6 +298,6 @@ final class SupportCheckTests: XCTestCase {
         XCTAssertTrue(verdict([step(reports: 40)]) == (.doesNotWork, .reportsNotReadable))
         XCTAssertTrue(verdict([step(), step()]) == (.doesNotWork, .noReports))
         XCTAssertTrue(verdict([]) == (.doesNotWork, .noReports))
-        XCTAssertEqual(SupportVerdict.allCases.map(\.rawValue), ["works-fully", "works-with-one-finger", "doesnt-work"])
+        XCTAssertEqual(SupportVerdict.allCases.map(\.rawValue), ["full", "one-finger", "none"])
     }
 }
