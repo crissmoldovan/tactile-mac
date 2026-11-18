@@ -288,12 +288,19 @@ struct MenuTouchscreenDetails: Equatable {
     var controls: Controls?
     /// Why a connected touchscreen can't be used.
     var unusable: Unusable?
+    /// Help Me Support This Touchscreen…, for every connected touchscreen, usable or not; nil for
+    /// one that isn't connected.
+    var support: SupportCheckAvailability?
+    /// What the check needs to find it, with `support`.
+    var supportTarget: SupportTarget?
 
     init(_ touchscreen: TouchscreenSnapshot, in snapshot: AppSnapshot) {
         id = touchscreen.id
         name = touchscreen.name
         summary = Wording.menuSummary(for: touchscreen)
         unusable = Unusable(touchscreen)
+        support = touchscreen.isConnected ? SupportCheckAvailability.of(touchscreen, in: snapshot) : nil
+        supportTarget = touchscreen.isConnected ? SupportTarget(touchscreen) : nil
         guard touchscreen.isConnected, unusable == nil else {
             controls = nil
             return

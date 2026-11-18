@@ -8,8 +8,37 @@ import Foundation
 import IOKit
 import IOKit.hid
 
+/// Which HID interfaces a system watches.
+enum HIDMatching: Sendable {
+    /// Touchscreen interfaces (a Touch Screen collection, 0x0D/0x04) and mouse interfaces (a Mouse
+    /// collection, 0x01/0x02): the touchscreen source's.
+    case touchscreensAndMice
+    /// Every interface on the Digitizer page (0x0D), and pointer and mouse interfaces (0x01/0x01,
+    /// 0x01/0x02): the support check's, which lists digitisers Tactile doesn't drive and touchscreens
+    /// that are only a mouse. Watching opens nothing.
+    case supportCheck
+
+    /// IOHIDManager's matching dictionaries.
+    var criteria: [[String: Int]] {
+        switch self {
+        case .touchscreensAndMice:
+            return [
+                [kIOHIDDeviceUsagePageKey: 0x0D, kIOHIDDeviceUsageKey: 0x04],  // Touch Screen
+                [kIOHIDDeviceUsagePageKey: 0x01, kIOHIDDeviceUsageKey: 0x02],  // Mouse
+            ]
+        case .supportCheck:
+            return [
+                [kIOHIDDeviceUsagePageKey: 0x0D],                              // any digitiser
+                [kIOHIDDeviceUsagePageKey: 0x01, kIOHIDDeviceUsageKey: 0x01],  // Pointer
+                [kIOHIDDeviceUsagePageKey: 0x01, kIOHIDDeviceUsageKey: 0x02],  // Mouse
+            ]
+        }
+    }
+}
+
 @MainActor
 final class IOKitHIDSystem: HIDSystem {
+    private let matching: HIDMatching
     private var manager: IOHIDManager?
     /// What the manager's callbacks find the system through. It lives as long as the system.
     private let context = ManagerContext()
@@ -24,7 +53,8 @@ final class IOKitHIDSystem: HIDSystem {
     private var matched: (@MainActor (HIDInterfaceDescription) -> Void)?
     private var removed: (@MainActor (HIDInterfaceID) -> Void)?
 
-    init() {
+    init(matching: HIDMatching = .touchscreensAndMice) {
+        self.matching = matching
         context.system = self
     }
 
@@ -45,11 +75,7 @@ final class IOKitHIDSystem: HIDSystem {
         // The manager is never opened: IOHIDManagerOpen would open every matched interface, every
         // mouse on the Mac included. Each interface is opened by itself, and only when taken.
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        let criteria: [[String: Int]] = [
-            [kIOHIDDeviceUsagePageKey: 0x0D, kIOHIDDeviceUsageKey: 0x04],  // Touch Screen
-            [kIOHIDDeviceUsagePageKey: 0x01, kIOHIDDeviceUsageKey: 0x02],  // Mouse
-        ]
-        IOHIDManagerSetDeviceMatchingMultiple(manager, criteria as CFArray)
+        IOHIDManagerSetDeviceMatchingMultiple(manager, matching.criteria as CFArray)
         let pointer = Unmanaged.passUnretained(context).toOpaque()
         IOHIDManagerRegisterDeviceMatchingCallback(manager, deviceMatchedCallback, pointer)
         IOHIDManagerRegisterDeviceRemovalCallback(manager, deviceRemovedCallback, pointer)
@@ -139,13 +165,35 @@ final class IOKitHIDSystem: HIDSystem {
     func readFeatureReport(_ id: HIDInterfaceID, reportID: Int, length: Int) -> FeatureReportRead {
         guard let device = devices[id] else { return FeatureReportRead(result: IOResult.noDevice, length: 0, seconds: 0) }
         guard length > 0 else { return FeatureReportRead(result: IOResult.badArgument, length: 0, seconds: 0) }
+        return Self.getReport(device, reportID: reportID, length: length)
+    }
+
+    /// Where background reads block: a serial queue of their own, never Swift's cooperative pool,
+    /// which a call that waits up to the HID request timeout must not hold.
+    nonisolated private static let readQueue = DispatchQueue(label: "com.crissmoldovan.tactile.feature-reads", qos: .userInitiated)
+
+    /// The same call on its own serial queue, as hidapi makes it while the device is scheduled on
+    /// another thread's run loop. The device is kept alive by the box until the call returns. The
+    /// check closes nothing while one is in flight (`SupportProbe`).
+    func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
+        guard let device = devices[id] else { return FeatureReportRead(result: IOResult.noDevice, length: 0, seconds: 0) }
+        guard length > 0 else { return FeatureReportRead(result: IOResult.badArgument, length: 0, seconds: 0) }
+        let box = DeviceBox(device: device)
+        return await withCheckedContinuation { continuation in
+            Self.readQueue.async {
+                continuation.resume(returning: Self.getReport(box.device, reportID: reportID, length: length))
+            }
+        }
+    }
+
+    nonisolated private static func getReport(_ device: IOHIDDevice, reportID: Int, length: Int) -> FeatureReportRead {
         var buffer = [UInt8](repeating: 0, count: length)
         var reportLength = CFIndex(length)
         let start = ProcessInfo.processInfo.systemUptime
         let result = IOHIDDeviceGetReport(device, kIOHIDReportTypeFeature, CFIndex(reportID), &buffer, &reportLength)
         let seconds = ProcessInfo.processInfo.systemUptime - start
         let returned = result == kIOReturnSuccess ? min(max(Int(reportLength), 0), length) : 0
-        return FeatureReportRead(result: result, length: returned, seconds: seconds)
+        return FeatureReportRead(result: result, length: returned, seconds: seconds, bytes: Array(buffer.prefix(returned)))
     }
 
     /// The HID stack builds the whole feature report, keeping its other fields (such as Device
@@ -223,7 +271,18 @@ final class IOKitHIDSystem: HIDSystem {
             serial: property(kIOHIDSerialNumberKey) ?? "", product: property(kIOHIDProductKey) ?? "",
             usages: usages,
             descriptor: descriptor.map { [UInt8]($0) },
-            maxInputReportSize: property(kIOHIDMaxInputReportSizeKey))
+            maxInputReportSize: property(kIOHIDMaxInputReportSizeKey),
+            manufacturer: property(kIOHIDManufacturerKey) ?? "",
+            isBuiltIn: property(kIOHIDBuiltInKey) ?? false)
+    }
+}
+
+/// A device handed to a background read. IOHIDDevice is a CF object, safe to retain from any thread.
+private final class DeviceBox: @unchecked Sendable {
+    let device: IOHIDDevice
+
+    init(device: IOHIDDevice) {
+        self.device = device
     }
 }
 

@@ -53,7 +53,9 @@ final class ResolverTests: XCTestCase {
                 stripDrives: false),
             Row(rule: "4a", change: { $0.isAsleep = true }, mode: .released, state: .released, status: paired,
                 stripDrives: false),
-            Row(rule: "4b", change: { $0.records[Desk.ilitekHandle] = nil }, mode: .held, state: .taken,
+            Row(rule: "4b", change: { $0.supportChecks = [UUID(): Desk.ilitekID] }, mode: .released, state: .released, status: paired,
+                stripDrives: true),
+            Row(rule: "4c", change: { $0.records[Desk.ilitekHandle] = nil }, mode: .held, state: .taken,
                 status: .notSetUp, stripDrives: true),
             Row(rule: "5", change: {
                 $0.settings.touchscreens[Desk.ilitekID]?.isOn = false
@@ -88,6 +90,27 @@ final class ResolverTests: XCTestCase {
             XCTAssertEqual(resolved.ilitekSnapshot?.mode, row.mode, "rule \(row.rule)")
             XCTAssertEqual(resolved.strip?.mode, row.stripDrives ? .driving : .released, "rule \(row.rule): the strip")
         }
+    }
+
+    /// A touchscreen being checked is let go, so the check can take it as Tactile does; it can't run
+    /// a set-up meanwhile, and the other touchscreens carry on.
+    func testATouchscreenBeingCheckedIsLetGo() throws {
+        var inputs = Desk.inputs
+        XCTAssertTrue(Resolver.canRunSetUp(Desk.ilitekID, inputs))
+        let claim = UUID()
+        inputs.supportChecks = [claim: Desk.ilitekID]
+        let resolved = Resolved(inputs)
+        XCTAssertEqual(resolved.ilitek?.rule, .supportCheck)
+        XCTAssertEqual(resolved.ilitek?.deviceState, .released)
+        XCTAssertEqual(resolved.strip?.mode, .driving)
+        XCTAssertFalse(Resolver.canRunSetUp(Desk.ilitekID, inputs))
+        XCTAssertTrue(Resolver.canRunSetUp(Desk.stripID, inputs))
+        XCTAssertEqual(Resolver.apply(.beginSupportCheck(Desk.ilitekID, claim: claim), to: inputs), inputs.settings, "no setting changes")
+        XCTAssertEqual(Resolver.apply(.endSupportCheck(claim: claim), to: inputs), inputs.settings)
+
+        inputs.setUpMode = SetUpModeSnapshot(stage: .choosing, displays: [], touchscreens: [], justSetUp: nil, notice: nil)
+        XCTAssertEqual(Resolved(inputs).ilitek?.deviceState, .released, "set-up mode doesn't take it back")
+        XCTAssertEqual(Resolved(inputs).strip?.mode, .settingUp)
     }
 
     func testFirstRuleWins() {

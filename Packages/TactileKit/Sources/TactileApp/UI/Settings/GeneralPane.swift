@@ -1,11 +1,14 @@
 import SwiftUI
 
 /// General: the warnings, when there are any, each with its button; Tactile on or off, and Launch at
-/// login; diagnostics (debug logging, recording frames, Copy diagnostics); Experimental (Swipes
-/// follow the fingers); Updates (`UpdatesSection`); the version.
+/// login; diagnostics (debug logging, recording frames, Copy diagnostics); Touchscreen Not Listed?
+/// (`NotListedSection`); Experimental (Swipes follow the fingers); Updates (`UpdatesSection`); the
+/// version.
 struct GeneralPane: View {
     var snapshot: AppSnapshot
     var perform: PerformCommand
+    /// The touch devices Tactile doesn't list, in the app; nil where nothing is watched.
+    var notListed: NotListedDevices? = nil
 
     var body: some View {
         Form {
@@ -41,6 +44,7 @@ struct GeneralPane: View {
             } footer: {
                 Footnote(Wording.diagnosticsFootnote)
             }
+            NotListedSection(snapshot: snapshot, perform: perform, list: notListed)
             Section {
                 FollowedSwipesRowView(row: FollowedSwipesRow(snapshot), perform: perform)
             } header: {

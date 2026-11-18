@@ -10,6 +10,7 @@ The idea in one line: **the website is only a courier.** Tactile checks every up
 - **Where it asks.** The Info.plist key `TactileUpdateBaseURL`, set by the build setting `TACTILE_UPDATE_BASE_URL` in `Config/Updates.xcconfig`: `https://tactilemac.com`. It must be an https origin. The user default of the same name can point one installed copy at another https origin, or at `http://localhost` for a website run locally.
 - **Which keys it trusts.** The Info.plist key `TactileUpdateKeys`, set by the build setting `TACTILE_UPDATE_KEYS` in the same file: `<keyId>:<base64 public key>`, several separated by spaces, each keyId once. Today it is `k1` alone. `UpdateTrust.productionKeys` holds the same keys, for a build whose Info.plist names none.
 - **Unusable settings fail closed.** A site or a key list that is there but can't be used (one bad key entry is enough) turns updates off, as for a build that isn't official. `release.sh` reads the built app's Info.plist with the app's own code before anything is published.
+- **Touchscreen reports go to the same site,** from the official build only, and only when the person presses **Send** (see *Touchscreen reports*, below). Any other build only saves a report.
 - **When.** One check a minute after launch, then one every 24 hours, while **Check for updates automatically** (in General, on by default) is on; a failed one is tried again after an hour. And on **Check for Updates…** in the menu. A failed automatic check says nothing; a failed manual one says why, in a line.
 
 ## A release
@@ -86,3 +87,19 @@ Then the checks, in this order. Any failure stops the update, deletes the downlo
 Tactile writes a small helper script into the update folder, starts it detached, and quits the ordinary way, letting the touchscreens go. The helper waits for Tactile to end, moves the new app next to the old one, moves the old one aside, moves the new one into its place and opens it. It removes the old copy only once the new one has started and is still running a moment later. If a step fails, it puts the old app back and opens that.
 
 Accessibility and Input Monitoring survive an update, because the bundle identifier and the Developer ID stay the same.
+
+## Touchscreen reports
+
+Not part of updating, but answered by the same site, under the same rules: only the official build asks it (`SupportSending`, from `UpdateAvailability`), at the site its updates ask, and the site is only a courier, holding no secret of the app's. **Help Me Support This Touchscreen…** checks a touchscreen and makes a report; the person sees every file of it, and nothing is sent until they press **Send**.
+
+- **`GET /api/support/status`**, when the person presses **Send** and never before, with a 5-second limit. Only `{"available": true}`, with 200, from the site, lets the report go. Anything else, an error or the limit means sending isn't switched on: nothing is uploaded, and the app offers **Save Report…**.
+- **Stopping.** **Stop Sending**, Esc, or closing the window while a report goes cancels the request. Before the upload began, nothing was sent; after, the app says the report may already have arrived, that nothing is filed until the person confirms by email, and that ignoring that email keeps it from being filed. While Tactile quits, this is logged rather than shown, so quitting never waits.
+- **Only a finished check is sent.** A check interrupted by sleep, unplugging, or a device that couldn't be opened ends as Interrupted, with no verdict and no report.
+- **`POST /api/support/requests`**, `multipart/form-data`, each part once:
+  - `bundle`: the report, a zip sent as the file `tactile-report.zip`, at most 2 MiB;
+  - `email`: the address the person typed, trimmed;
+  - `note`: optional, at most 1,000 characters and 5,000 bytes, plain text; left out when empty;
+  - `app`: JSON `{"version": "0.7.0", "build": 520}`;
+  - `fields`: JSON with exactly `usb_id` (`222a:0001`, lower case), `product` (1 to 64 characters, no serial number), `verdict` (`full`, `one-finger` or `none`), `kind` (`touchscreen` or `mouse-only`; a digitiser goes as `touchscreen`), `app_version`, `app_build` (as in `app`), `macos` (`26.1`) and `mac_model` (`Mac15,6`).
+- **The report** holds, at the zip's root and nothing else, `summary.txt`, `device.json`, `switches.json`, `touches.json`, `tactile-log.txt`, `mac.json`, `manifest.json` and at most 24 `descriptors/interface-<n>.hex`: at most 32 entries, unpacking to at most 8 MiB, stored or deflated, with no ZIP64. It is made with `ditto -c -k --norsrc --noextattr --noacl` in a temporary folder that is removed afterwards. Raw reports, then log lines, are cut until it fits. `tactile-log.txt` comes from Tactile's own in-memory record of what it did with the checked device this session, keyed by that device's interfaces and written without serial numbers or names; the system log isn't read. `manifest.json` is `{"schema": 1, "files": {"<name>": "<SHA-256, lower-case hex>", …}}`, listing every other file. No file holds a serial number, the Mac's serial or the person's name.
+- **Answers:** 202 is sent, and the person confirms by email before anything is filed; a 4xx with `{"error", "reason"}` shows the reason (the person can fix the email and send again); 408 says sending took too long; 429 says to try again later; 503, 502, any other answer, an answer from another origin and a network failure mean sending isn't available. Every answer but 202 offers **Save Report…**. Redirects are refused.

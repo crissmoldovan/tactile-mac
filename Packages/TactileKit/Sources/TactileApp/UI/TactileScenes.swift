@@ -20,6 +20,7 @@ public struct TactileScenes<Model: AppModel>: Scene {
         self.model = model
         SnapshotFollower.startForTheApp(model)
         GestureTesterWindow.startForTheApp(model)
+        SupportCheckWindow.startForTheApp(model)
     }
 
     public var body: some Scene {

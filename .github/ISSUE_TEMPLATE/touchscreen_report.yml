@@ -31,6 +31,12 @@ body:
         - From the source: `swift run --package-path Tools/tactile-probe tactile-probe list`.
 
         Please leave out the serial number.
+  - type: textarea
+    id: report
+    attributes:
+      label: Tactile's report (optional)
+      description: |
+        If you ran **Help Me Support This Touchscreen…** in Tactile and saved its report, drag the zip here. It holds no serial number and no personal data: only the files Tactile listed before you saved it. Remember that issues are public.
   - type: dropdown
     id: works
     attributes:

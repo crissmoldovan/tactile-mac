@@ -59,6 +59,11 @@ final class FakeHIDSystem: HIDSystem {
     var readSeconds: TimeInterval = 0
     /// How many bytes a successful read gives back; `nil` for as many as asked. A failed read gives none.
     var readReturnedLength: Int?
+    /// What a successful read of each feature report gives back, by report ID, cut to the length
+    /// returned: the report ID byte and then zeros when not given.
+    var featureReportBytes: [Int: [UInt8]] = [:]
+    /// What each read is answered with instead of `readResult`, by report ID.
+    var readResults: [Int: IOReturn] = [:]
     /// Keeps delivering reports after `stopReports`, as a report already on its way would be.
     var keepsDeliveringAfterStop = false
 
@@ -153,8 +158,26 @@ final class FakeHIDSystem: HIDSystem {
     func readFeatureReport(_ id: HIDInterfaceID, reportID: Int, length: Int) -> FeatureReportRead {
         calls.append(.readFeatureReport(id, reportID: reportID, length: length))
         guard connected.contains(where: { $0.id == id }) else { return FeatureReportRead(result: IOResult.noDevice, length: 0, seconds: 0) }
-        let returned = readResult == kIOReturnSuccess ? readReturnedLength ?? length : 0
-        return FeatureReportRead(result: readResult, length: returned, seconds: readSeconds)
+        let result = readResults[reportID] ?? readResult
+        let returned = result == kIOReturnSuccess ? readReturnedLength ?? length : 0
+        let given = featureReportBytes[reportID] ?? [UInt8(truncatingIfNeeded: reportID)] + [UInt8](repeating: 0, count: max(length - 1, 0))
+        return FeatureReportRead(result: result, length: returned, seconds: readSeconds, bytes: Array(given.prefix(returned)))
+    }
+
+    /// Background reads wait for `resumeReads()`, as a panel slow to answer would hold them.
+    var suspendsReads = false
+    private var pendingReads: [CheckedContinuation<Void, Never>] = []
+    var readsWaiting: Int { pendingReads.count }
+
+    func resumeReads() {
+        let waiting = pendingReads
+        pendingReads = []
+        for read in waiting { read.resume() }
+    }
+
+    func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
+        if suspendsReads { await withCheckedContinuation { pendingReads.append($0) } }
+        return readFeatureReport(id, reportID: reportID, length: length)
     }
 
     func writeInputMode(_ id: HIDInterfaceID, _ value: Int) -> IOReturn {

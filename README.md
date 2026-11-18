@@ -28,9 +28,9 @@ It needs:
 - Several touchscreens at once. A panel that stays a mouse works as a one-finger touchscreen.
 - A gesture tester, to try every gesture a touchscreen can make.
 
-Tactile has been used with an ILITEK panel (USB ID `222a:0001`, multi-touch) and a wch.cn strip (`27c0:0859`, which stays a mouse, so one finger). Other touchscreens that follow the HID digitizer standard should work. If yours doesn't, please [report it](https://github.com/crissmoldovan/tactile-mac/issues/new/choose).
+Tactile has been used with an ILITEK panel (USB ID `222a:0001`, multi-touch) and a wch.cn strip (`27c0:0859`, which stays a mouse, so one finger). Other touchscreens that follow the HID digitizer standard should work. If yours doesn't, see [below](#if-your-touchscreen-doesnt-work).
 
-Tactile collects nothing. The official build asks tactilemac.com for updates, giving its own version and build, and that is all it sends.
+Tactile collects nothing. The official build asks tactilemac.com for updates, giving its own version and build. It sends a touchscreen report only when you check a touchscreen and press **Send**.
 
 ## First run
 
@@ -50,6 +50,16 @@ Tactile keeps its settings in `~/Library/Application Support/Tactile/settings.js
 ```
 
 **Copy diagnostics**, in General, puts a description of Tactile's state on the clipboard, for a bug report. It includes the touchscreens' serial numbers: remove them before you post it.
+
+## If your touchscreen doesn't work
+
+Choose **Help Me Support This Touchscreen…** in its pane in Settings, or in its details beside the menu. If Tactile doesn't list it at all, look under **Touchscreen Not Listed?** in General, which shows digitisers and touchscreens that only act as a mouse.
+
+The check takes a minute. Tactile reads what the touchscreen says about itself, takes it as it always does, and asks you to touch it with one, two and five fingers. It ends with a verdict: works fully, works with one finger, or doesn't work.
+
+You then see every file of the report, and can open each one. Nothing leaves your Mac until you press **Send**. The official build sends it to tactilemac.com with the email you type, so we can reply, and nothing is filed until you confirm by email. The report holds no serial number, and nothing about your Mac beyond its model, its macOS version and how many displays it has.
+
+Any other build, or the official one while sending isn't switched on, offers **Save Report…** instead. Attach the saved zip to a [touchscreen report](https://github.com/crissmoldovan/tactile-mac/issues/new?template=touchscreen_report.yml) on GitHub. GitHub issues are public.
 
 ## Building from source
 
@@ -108,11 +118,11 @@ TactileKit also has a check of its device layer: `swift run --package-path Packa
 | Path | What it holds |
 |---|---|
 | `Tactile.xcodeproj`, `Tactile/` | The app's Xcode project and entry point, its asset catalogue (the icon and the menu-bar glyphs) and entitlements. `Tactile/IconSources/` holds the icon's drawings |
-| `Packages/TactileKit/` | Everything else: `TactileReading` (reports into contacts), `TactileScreens` (touchscreens, displays, pairing, settings), `TactileGestures` (the gesture engine), `TactileOutput` (events, pointer, circles), `TactileDevices` (the USB side), `TactileUpdates` (the updater) and `TactileApp` (the model and the interface) |
+| `Packages/TactileKit/` | Everything else: `TactileReading` (reports into contacts), `TactileScreens` (touchscreens, displays, pairing, settings), `TactileGestures` (the gesture engine), `TactileOutput` (events, pointer, circles), `TactileDevices` (the USB side, and the touchscreen check), `TactileUpdates` (the updater), `TactileSupport` (the check's report, and sending it) and `TactileApp` (the model and the interface) |
 | `Config/` | Signing and the update settings |
 | `Fixtures/surveys/` | Two recorded panel surveys, which the tests replay. Their serial numbers and display IDs are placeholders |
 | `Tools/` | `install.sh`, `release.sh` and the three tool packages |
-| `docs/` | The updates contract |
+| `docs/` | The updates contract, and the touchscreen report the site takes |
 
 ## Licence
 

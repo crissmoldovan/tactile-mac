@@ -49,6 +49,9 @@ public struct AppInputs: Equatable, Sendable {
     public var canFollowSwipes: Bool
     /// Whether Tactile opens at login, as the system says.
     public var launchAtLogin: LaunchAtLogin
+    /// The touchscreen checks' claims, each on one touchscreen: Tactile lets go of a touchscreen
+    /// while any claim on it is held (see `AppCommand.beginSupportCheck`).
+    public var supportChecks: [UUID: TouchscreenID]
 
     public init(
         appVersion: String, settings: TactileSettings, connected: [ConnectedTouchscreen],
@@ -56,7 +59,7 @@ public struct AppInputs: Equatable, Sendable {
         hasAccessibilityAccess: Bool, isSessionActive: Bool, isAsleep: Bool, isTouchUpRunning: Bool,
         areMissionControlShortcutsOn: Bool, settingsWereSetAside: Bool, isQuitting: Bool, setUp: SetUpSnapshot? = nil,
         lastKnownDisplays: [DisplayFacts]? = nil, canFollowSwipes: Bool = false, launchAtLogin: LaunchAtLogin = .unavailable,
-        setUpMode: SetUpModeSnapshot? = nil
+        setUpMode: SetUpModeSnapshot? = nil, supportChecks: [UUID: TouchscreenID] = [:]
     ) {
         self.appVersion = appVersion
         self.settings = settings
@@ -76,6 +79,7 @@ public struct AppInputs: Equatable, Sendable {
         self.lastKnownDisplays = lastKnownDisplays
         self.canFollowSwipes = canFollowSwipes
         self.launchAtLogin = launchAtLogin
+        self.supportChecks = supportChecks
     }
 }
 
@@ -123,7 +127,7 @@ public struct Driving: Equatable, Sendable {
 
 /// Which row of the mode table decided a touchscreen's mode, for the log.
 public enum ModeRule: String, Sendable {
-    case quitting, tactileOff, noAccessibility, sessionNotActive, asleep, noRecord, settingUp, offLeftToMacOS,
+    case quitting, tactileOff, noAccessibility, sessionNotActive, asleep, supportCheck, noRecord, settingUp, offLeftToMacOS,
         offIgnoringTouches, notPaired, displayNotConnected, touchesUnreadable, mouseModeShared, paired
 }
 
@@ -174,9 +178,10 @@ public struct Resolution: Equatable, Sendable {
 /// | 3 | No Accessibility access | released | released | `accessibilityMissing` |
 /// | 4 | The session is not active | released | released | as it would otherwise be |
 /// | 4a | The Mac is going to sleep or asleep | released | released | as it would otherwise be |
-/// | 4b | No record: it can't be told apart from another connected touchscreen | held | taken | `notSetUp` |
-/// | 4c | A set-up is running for it, or set-up mode is on, and it can run one (see `canRunSetUp`) | settingUp | taken | as it would otherwise be |
-/// | 4d | Set-up mode is on, and it can't run a set-up | held | taken | as it would otherwise be |
+/// | 4b | A touchscreen check holds a claim on it (`supportChecks`) | released | released | as it would otherwise be |
+/// | 4c | No record: it can't be told apart from another connected touchscreen | held | taken | `notSetUp` |
+/// | 4d | A set-up is running for it, or set-up mode is on, and it can run one (see `canRunSetUp`) | settingUp | taken | as it would otherwise be |
+/// | 4e | Set-up mode is on, and it can't run a set-up | held | taken | as it would otherwise be |
 /// | 5 | Off, "leave it to macOS" | released | released | `off` |
 /// | 6 | Off, "ignore touches" | held | taken | `off` |
 /// | 7 | Not paired | held | taken | `notSetUp` |
@@ -191,7 +196,8 @@ public struct Resolution: Equatable, Sendable {
 /// So set-up works on a touchscreen that is off or unpaired, and anything that releases every
 /// touchscreen (rows 1–4a) ends it: the model ends the flow, storing nothing, when its touchscreen
 /// can no longer run it, and ends set-up mode. While set-up mode is on no touchscreen drives: every
-/// touch is set-up input (rows 4c and 4d).
+/// touch is set-up input (rows 4d and 4e). The touchscreen check's touchscreen is let go (row 4b),
+/// so the check can take it exactly as Tactile does, and can't run a set-up until the check ends.
 ///
 /// Never a guess: a pairing's display is found by `DisplayMatcher` alone, given every stored
 /// pairing, of connected and remembered touchscreens alike, which never gives two touchscreens one
@@ -396,7 +402,8 @@ public enum Resolver {
             settings.swipesFollowFingers = isOn
         case .askForAccessibility, .beginSetUp, .setUpConfirmSize, .setUpRedo, .setUpDone, .cancelSetUp,
              .copyDiagnostics, .setLaunchAtLogin, .openLoginItemsSettings, .beginSetUpMode, .setUpChoose, .setUpBack,
-             .openGestureTester, .closeGestureTester, .setGestureTesterPerformsSwipes, .clearGestureTester:
+             .openGestureTester, .closeGestureTester, .setGestureTesterPerformsSwipes, .clearGestureTester,
+             .beginSupportCheck, .endSupportCheck:
             // Not changes to the settings: the model carries these out itself (the system keeps
             // whether Tactile opens at login).
             break
@@ -453,7 +460,7 @@ public enum Resolver {
              .resetBehaviour, .beginSetUp, .setUpConfirmSize, .setUpRedo, .setUpDone, .cancelSetUp, .declineSetUp,
              .setRecordsFrames, .copyDiagnostics, .setSwipesFollowFingers, .setLaunchAtLogin, .openLoginItemsSettings,
              .beginSetUpMode, .setUpChoose, .setUpBack, .openGestureTester, .closeGestureTester,
-             .setGestureTesterPerformsSwipes, .clearGestureTester:
+             .setGestureTesterPerformsSwipes, .clearGestureTester, .beginSupportCheck, .endSupportCheck:
             return false
         }
     }
@@ -467,12 +474,12 @@ public enum Resolver {
             return id
         case .setOneFinger(let id, _), .setPointerReturn(let id, _), .setShowsCircles(let id, _), .setGestures(let id, _),
              .setRejection(let id, _), .copyBehaviour(_, let id), .resetBehaviour(let id), .clearCalibration(let id),
-             .beginSetUp(let id, _), .declineSetUp(let id), .openGestureTester(let id):
+             .beginSetUp(let id, _), .declineSetUp(let id), .openGestureTester(let id), .beginSupportCheck(let id, _):
             return id
         case .setOn, .renameDisplay, .setDebugLogging, .askForAccessibility, .setUpConfirmSize, .setUpRedo, .setUpDone,
              .cancelSetUp, .setRecordsFrames, .copyDiagnostics, .setSwipesFollowFingers, .setLaunchAtLogin,
              .openLoginItemsSettings, .beginSetUpMode, .setUpChoose, .setUpBack, .closeGestureTester,
-             .setGestureTesterPerformsSwipes, .clearGestureTester:
+             .setGestureTesterPerformsSwipes, .clearGestureTester, .endSupportCheck:
             return nil
         }
     }
@@ -718,6 +725,7 @@ private struct World {
         if !inputs.hasAccessibilityAccess { return released(.noAccessibility) }
         if !inputs.isSessionActive { return released(.sessionNotActive) }
         if inputs.isAsleep { return released(.asleep) }
+        if inputs.supportChecks.values.contains(screen.id) { return released(.supportCheck) }
         if !screen.hasRecord { return held(.noRecord) }
         if inputs.setUp?.touchscreen == screen.id || inputs.setUpMode != nil, canRunSetUp(screen) {
             // Taken, its touches for the flow or the mode: never a pipeline, never the pointer.
@@ -761,6 +769,7 @@ private struct World {
         }
         if device.status.touchOrigin == .unreadable { return false }
         if macOSAlsoHandles(screen) { return false }
+        if inputs.supportChecks.values.contains(screen.id) { return false }
         return true
     }
 

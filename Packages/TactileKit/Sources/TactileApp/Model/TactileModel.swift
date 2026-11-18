@@ -260,6 +260,20 @@ public final class TactileModel: AppModel, TouchscreenSourceDelegate {
             return
         case .openGestureTester, .closeGestureTester, .setGestureTesterPerformsSwipes, .clearGestureTester:
             performGestureTester(command)
+        case .beginSupportCheck(let id, let claim):
+            guard inputs.setUp == nil, setUp == nil, setUpMode == nil else {
+                ModelLog.model.info("The touchscreen check of \(Self.usbAndLocation(id, self.inputs), privacy: .public) can't begin while a set-up runs")
+                return
+            }
+            ModelLog.model.info("A touchscreen check has \(Self.usbAndLocation(id, self.inputs), privacy: .public): letting it go until the check ends")
+            inputs.supportChecks[claim] = id
+        case .endSupportCheck(let claim):
+            guard let id = inputs.supportChecks.removeValue(forKey: claim) else {
+                ModelLog.model.info("A touchscreen check's claim was given back that isn't held: nothing changes")
+                return
+            }
+            let stillHeld = inputs.supportChecks.values.contains(id)
+            ModelLog.model.info("A touchscreen check let \(Self.usbAndLocation(id, self.inputs), privacy: .public) go: \(stillHeld ? "another check still holds it" : "taking it back", privacy: .public)")
         default:
             break
         }
@@ -953,6 +967,14 @@ public final class TactileModel: AppModel, TouchscreenSourceDelegate {
     private static func describe(_ touchscreen: ConnectedTouchscreen) -> String {
         let facts = touchscreen.facts
         return "\(touchscreen.handle) \"\(facts.name)\" \(String(format: "%04x:%04x", facts.vendorID, facts.productID)) serial \"\(facts.serial)\" at \(String(format: "%08x", facts.locationID)), \(touchscreen.maxContacts) contacts, mouse interface \(touchscreen.hasMouseInterface ? "yes" : "no")"
+    }
+
+    /// A touchscreen by its USB ID and location, never its record's ID, which holds its serial:
+    /// "222a:0001 at 01141000".
+    static func usbAndLocation(_ id: TouchscreenID, _ inputs: AppInputs) -> String {
+        guard let handle = inputs.records.first(where: { $0.value == id })?.key,
+              let facts = inputs.connected.first(where: { $0.handle == handle })?.facts else { return "a touchscreen" }
+        return String(format: "%04x:%04x at %08x", facts.vendorID, facts.productID, facts.locationID)
     }
 
     private static func describe(_ status: DeviceStatus) -> String {

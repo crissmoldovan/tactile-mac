@@ -144,6 +144,19 @@ struct TouchscreenDetailsView: View {
                 }
             }
 
+            if let support = details.support?.whileFinishing(SupportChecksFinishing.shared.isFinishing(details.id)),
+               let target = details.supportTarget {
+                PanelSeparator()
+                PanelRowButton(title: Wording.helpMeSupport, isEnabled: support == .available) {
+                    actions.closeMenu()
+                    SupportCheckWindow.open(target, perform: perform)
+                }
+                .help(support == .available ? "" : Wording.supportUnavailable(support))
+                if support != .available {
+                    PanelReason(text: Wording.supportUnavailable(support))
+                }
+            }
+
             PanelSeparator()
             PanelRowButton(title: Wording.settingsFor(name: details.name)) {
                 actions.openSettings(details.pane)
@@ -226,6 +239,15 @@ struct TouchscreenDetailsMenu: View {
                 if let reason = availability.reason {
                     Text(Wording.setUpUnavailable(reason))
                 }
+            }
+        }
+        if let support = details.support?.whileFinishing(SupportChecksFinishing.shared.isFinishing(details.id)),
+           let target = details.supportTarget {
+            Divider()
+            Button(Wording.helpMeSupport) { SupportCheckWindow.open(target, perform: perform) }
+                .disabled(support != .available)
+            if support != .available {
+                Text(Wording.supportUnavailable(support))
             }
         }
         Divider()
