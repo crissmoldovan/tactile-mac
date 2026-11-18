@@ -14,6 +14,7 @@ struct RegularAppHolds: Equatable, Sendable {
     enum Holder: String, Sendable {
         case settings
         case gestureTester
+        case supportCheck
     }
 
     /// The windows open now.

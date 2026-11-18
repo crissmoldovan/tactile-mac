@@ -49,6 +49,7 @@ struct TouchscreenPane: View {
                 BehaviourSection(touchscreen: touchscreen, perform: perform)
                 GesturesSection(touchscreen: touchscreen, warnings: snapshot.warnings, perform: perform)
                 GestureTesterSection(touchscreen: touchscreen, snapshot: snapshot, perform: perform)
+                SupportSection(touchscreen: touchscreen, snapshot: snapshot, perform: perform)
                 AccidentalTouchesSection(touchscreen: touchscreen, perform: perform)
                 WhenOffSection(touchscreen: touchscreen, perform: perform)
                 Section {

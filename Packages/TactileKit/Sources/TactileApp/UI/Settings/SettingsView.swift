@@ -16,12 +16,16 @@ public struct SettingsView<Model: AppModel>: View {
     @State private var highlightRefresh = 0
     /// A pane asked for from the menu (Settings for <name>…).
     private let paneRequests = SettingsPaneRequests.shared
+    /// General's touch devices Tactile doesn't list: the app's; nil in previews, which watch nothing.
+    private let notListed: NotListedDevices?
 
+    /// The app's Settings, whose General lists the touch devices Tactile doesn't.
     public init(model: Model) {
-        self.init(model: model, selection: nil)
+        self.init(model: model, selection: nil, notListed: model is TactileModel ? NotListedDevices.shared : nil)
     }
 
-    init(model: Model, selection: SidebarItem?) {
+    init(model: Model, selection: SidebarItem?, notListed: NotListedDevices? = nil) {
+        self.notListed = notListed
         self.model = model
         _selection = State(initialValue: selection)
         _chosenByPerson = State(initialValue: selection != nil)
@@ -51,7 +55,7 @@ public struct SettingsView<Model: AppModel>: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
             SettingsDetail(snapshot: snapshot, item: shown, perform: { model.perform($0) },
-                           snapshotNow: { model.snapshot })
+                           snapshotNow: { model.snapshot }, notListed: notListed)
         }
         .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
         .background(SettingsWindowReader())
@@ -131,17 +135,19 @@ struct SettingsDetail: View {
     var perform: PerformCommand
     /// The model's snapshot as it is when called (see `TouchscreenPane.snapshotNow`).
     var snapshotNow: (@MainActor () -> AppSnapshot)? = nil
+    /// General's touch devices Tactile doesn't list; nil where nothing is watched.
+    var notListed: NotListedDevices? = nil
 
     var body: some View {
         switch item {
         case .general:
-            GeneralPane(snapshot: snapshot, perform: perform)
+            GeneralPane(snapshot: snapshot, perform: perform, notListed: notListed)
         case .touchscreen(let id):
             if let touchscreen = snapshot.touchscreens.first(where: { $0.id == id }) {
                 TouchscreenPane(touchscreen: touchscreen, snapshot: snapshot, perform: perform, snapshotNow: snapshotNow)
                     .id(id)
             } else {
-                GeneralPane(snapshot: snapshot, perform: perform)
+                GeneralPane(snapshot: snapshot, perform: perform, notListed: notListed)
             }
         }
     }
