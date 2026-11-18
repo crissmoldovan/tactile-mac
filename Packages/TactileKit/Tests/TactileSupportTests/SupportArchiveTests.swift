@@ -125,6 +125,24 @@ final class SupportArchiveTests: XCTestCase {
 
     // MARK: - ditto, for real, in a temporary folder
 
+    /// Writes a real report's zip for tactilemac.com's own checks to read (its `checkBundle`), into the
+    /// folder `TACTILE_WRITE_REPORT` names. Skipped unless it is set.
+    func testWriteAReportForTheSitesChecks() async throws {
+        guard let path = ProcessInfo.processInfo.environment["TACTILE_WRITE_REPORT"], !path.isEmpty else {
+            throw XCTSkip("Set TACTILE_WRITE_REPORT to a folder to write a report for the site's checks.")
+        }
+        let folder = try makeFolder()
+        let archive = try await SupportArchiver.make(try Fixture.ilitekInput(logLines: ["one"]), zipper: DittoZipper(),
+                                                     temporary: folder).get()
+        let out = URL(fileURLWithPath: path, isDirectory: true)
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        try archive.data.write(to: out.appendingPathComponent("tactile-report.zip"))
+        // And the whole request, as the site's reader takes it (boundary "TactileBoundary").
+        let request = try XCTUnwrap(SupportRequest(bundle: archive.data, input: try Fixture.ilitekInput(),
+                                                   email: "someone@example.com", note: "It only clicks.\nTwo lines."))
+        try SupportUploader.multipart(request, boundary: "TactileBoundary").write(to: out.appendingPathComponent("request.multipart"))
+    }
+
     func testDittoPutsTheFilesAtTheZipsRootAndNothingElse() async throws {
         let folder = try makeFolder()
         let input = try Fixture.ilitekInput(logLines: ["one", "two"])
