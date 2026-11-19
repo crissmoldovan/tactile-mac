@@ -159,6 +159,15 @@ public final class SupportProbe {
     /// The take whose read is in flight now, whether or not it is still the device taken (one of its
     /// interfaces may have gone meanwhile): nothing of it is closed until the read returns.
     private var readInFlight: Taken?
+    /// Where the take waits for its read: resumed by the read returning, or by the deadline.
+    private var pendingRead: CheckedContinuation<FeatureReportRead, Never>?
+    /// Runs work after a delay on the main actor: the main queue's timer, or the tests' stand-in.
+    private let schedule: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void
+
+    /// How long after a stop asked for during a read the probe waits for the read. IOKit's own HID
+    /// request timeout (about 5 s on USB) normally ends a read long before; this is for one that
+    /// never returns, so the check never holds a device, nor Tactile's touchscreen, for good.
+    public static let stopDeadline: TimeInterval = 30
 
     /// The device taken now.
     private final class Taken {
@@ -188,10 +197,14 @@ public final class SupportProbe {
         self.init(system: IOKitHIDSystem(matching: .supportCheck), logBook: .shared)
     }
 
-    /// `logBook` nil: one of its own, as the tests have.
-    init(system: HIDSystem, logBook: DeviceLogBook? = nil) {
+    /// `logBook` nil: one of its own, as the tests have. `schedule` nil: the main queue's timer.
+    init(system: HIDSystem, logBook: DeviceLogBook? = nil,
+         schedule: (@MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void)? = nil) {
         self.system = system
         self.logBook = logBook ?? DeviceLogBook()
+        self.schedule = schedule ?? { delay, work in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
+        }
     }
 
     /// Every device the check can check, connected now, in the order they arrived.
@@ -217,7 +230,10 @@ public final class SupportProbe {
         guard isStarted else { return }
         if let reading = readInFlight {
             reading.releaseAfterRead = true
-            stopAfterRead = true
+            if !stopAfterRead {
+                stopAfterRead = true
+                schedule(Self.stopDeadline) { [weak self] in self?.giveUp(on: reading) }
+            }
             return
         }
         release()
@@ -270,7 +286,7 @@ public final class SupportProbe {
             for report in interfaces[touch.id]?.decoder?.featureReportsToRead ?? [] {
                 taken.isReading = true
                 readInFlight = taken
-                let read = await system.readFeatureReportInBackground(touch.id, reportID: report.reportID, length: report.length)
+                let read = await self.read(touch.id, reportID: report.reportID, length: report.length)
                 readInFlight = nil
                 taken.isReading = false
                 guard stillTaking(taken) else { return nil }
@@ -304,6 +320,35 @@ public final class SupportProbe {
         // Listened to as the source listens: the touch interface, then its mouse.
         listen([touch] + (mouse.map { [$0] } ?? []), of: taken)
         return switches
+    }
+
+    /// One feature read off the main thread, which the take waits for until it returns, or until
+    /// the probe gives up on it (`giveUp(on:)`).
+    private func read(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
+        await withCheckedContinuation { continuation in
+            pendingRead = continuation
+            Task { @MainActor [weak self, system] in
+                let read = await system.readFeatureReportInBackground(id, reportID: reportID, length: length)
+                self?.readReturned(read)
+            }
+        }
+    }
+
+    private func readReturned(_ read: FeatureReportRead) {
+        guard let pending = pendingRead else { return }  // given up on: the take has moved on
+        pendingRead = nil
+        pending.resume(returning: read)
+    }
+
+    /// The deadline after a stop during a read: if that read is still in flight, the probe stops for
+    /// real. The device is closed under the read, the one time that is accepted: a read that hasn't
+    /// returned this long after IOKit's own timeout never will, and holding the device for good would
+    /// keep Tactile from its touchscreen. The take ends, as after a read that failed.
+    private func giveUp(on taken: Taken) {
+        guard readInFlight === taken, pendingRead != nil else { return }
+        log.error("Support check of \(taken.device.usbID, privacy: .public): the read hasn't returned \(Int(Self.stopDeadline), privacy: .public) s after the check was stopped; closing the device under it")
+        note(taken.device, "the read hasn't returned \(Int(Self.stopDeadline)) s after the check was stopped; closing the device under it")
+        readReturned(FeatureReportRead(result: IOResult.timeout, length: 0, seconds: Self.stopDeadline))
     }
 
     /// After a read: whether the take goes on. A release asked for meanwhile is done now, and one

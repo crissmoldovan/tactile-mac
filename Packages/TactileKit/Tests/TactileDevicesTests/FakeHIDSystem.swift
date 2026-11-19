@@ -175,8 +175,11 @@ final class FakeHIDSystem: HIDSystem {
         for read in waiting { read.resume() }
     }
 
+    /// Background reads on these interfaces wait for `resumeReads()`, whatever `suspendsReads` says.
+    var suspendsReadsOn: Set<HIDInterfaceID> = []
+
     func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
-        if suspendsReads { await withCheckedContinuation { pendingReads.append($0) } }
+        if suspendsReads || suspendsReadsOn.contains(id) { await withCheckedContinuation { pendingReads.append($0) } }
         return readFeatureReport(id, reportID: reportID, length: length)
     }
 

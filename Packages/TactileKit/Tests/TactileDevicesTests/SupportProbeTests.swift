@@ -408,4 +408,103 @@ final class SupportProbeTests: XCTestCase {
         XCTAssertTrue(system.calls.contains(.close(SupportDesk.stripMouseID, exclusive: true)))
         XCTAssertFalse(system.calls.contains { if case .writeInputMode = $0 { return true } else { return false } })
     }
+
+    // MARK: - A read that never returns (CUE-1298)
+
+    /// Stands in for the main queue's timer: holds what is scheduled, and runs it when told.
+    @MainActor
+    private final class Deadlines {
+        private(set) var delays: [TimeInterval] = []
+        private var work: [@MainActor () -> Void] = []
+
+        func schedule(_ delay: TimeInterval, _ job: @escaping @MainActor () -> Void) {
+            delays.append(delay)
+            work.append(job)
+        }
+
+        /// The deadlines pass.
+        func pass() {
+            let due = work
+            work = []
+            for job in due { job() }
+        }
+    }
+
+    /// A read that never returns: 30 s after the stop was asked for, the probe gives up on it and
+    /// stops for real, closing the device under the read, the one case where it does, and says so.
+    func testAReadThatNeverReturnsIsGivenUpOnAtTheDeadline() async throws {
+        let system = FakeHIDSystem(connected: try SupportDesk.all())
+        system.inputModeInterfaces = [SupportDesk.stripTouchID]
+        system.suspendsReads = true
+        let book = DeviceLogBook()
+        let deadlines = Deadlines()
+        let probe = SupportProbe(system: system, logBook: book, schedule: { deadlines.schedule($0, $1) })
+        probe.start()
+        let device = try device(probe, "27c0:0859")
+        let taking = Task { @MainActor in await probe.take(device, onReport: { _ in }, onGone: { _ in }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        system.clearCalls()
+        probe.stop()
+        XCTAssertEqual(system.calls, [], "the read is waited for first")
+        XCTAssertEqual(deadlines.delays, [SupportProbe.stopDeadline])
+        XCTAssertEqual(SupportProbe.stopDeadline, 30)
+
+        deadlines.pass()
+        let switches = await taking.value
+        XCTAssertNil(switches, "the take ends")
+        XCTAssertTrue(system.calls.contains(.close(SupportDesk.stripTouchID, exclusive: true)))
+        XCTAssertTrue(system.calls.contains(.close(SupportDesk.stripMouseID, exclusive: true)))
+        XCTAssertEqual(system.calls.last, .stopMatching, "stopped for real")
+        XCTAssertFalse(system.calls.contains { if case .writeInputMode = $0 { return true } else { return false } })
+        XCTAssertEqual(probe.devices, [])
+        XCTAssertTrue(book.entries(about: [SupportDesk.stripTouchID]).map(\.text).contains(
+            "Support check: the read hasn't returned 30 s after the check was stopped; closing the device under it"))
+
+        system.resumeReads()  // the read returns at last: nothing more happens
+        await Task.yield()
+        XCTAssertEqual(system.calls.filter { $0 == .stopMatching }.count, 1)
+    }
+
+    /// The read returns before the deadline: the deadline passing later changes nothing.
+    func testADeadlineAfterTheReadReturnedChangesNothing() async throws {
+        let system = FakeHIDSystem(connected: try SupportDesk.all())
+        system.suspendsReads = true
+        let deadlines = Deadlines()
+        let probe = SupportProbe(system: system, schedule: { deadlines.schedule($0, $1) })
+        probe.start()
+        let device = try device(probe, "27c0:0859")
+        let taking = Task { @MainActor in await probe.take(device, onReport: { _ in }, onGone: { _ in }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        probe.stop()
+        system.resumeReads()
+        _ = await taking.value
+        let calls = system.calls
+        deadlines.pass()
+        XCTAssertEqual(system.calls, calls)
+    }
+
+    /// Each device's reads are its own: a read held on one device doesn't hold up a check of another.
+    func testAReadOnAnotherDeviceGoesAheadWhileOneIsHeld() async throws {
+        let system = FakeHIDSystem(connected: try SupportDesk.all())
+        system.suspendsReadsOn = [SupportDesk.stripTouchID]
+        let first = SupportProbe(system: system)
+        let second = SupportProbe(system: system)
+        first.start()
+        second.start()
+        let strip = try device(first, "27c0:0859")
+        let held = Task { @MainActor in await first.take(strip, onReport: { _ in }, onGone: { _ in }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        let ilitek = await second.take(try device(second, "222a:0001"), onReport: { _ in }, onGone: { _ in })
+        XCTAssertEqual(ilitek?.reads.map(\.reportID), [0x06], "B's read went ahead")
+        XCTAssertEqual(system.readsWaiting, 1, "A's is still held")
+        system.resumeReads()
+        _ = await held.value
+    }
+
+    /// IOKit's system gives each interface a read queue of its own (made without opening anything).
+    func testEachInterfaceHasAReadQueueOfItsOwn() {
+        let system = IOKitHIDSystem(matching: .supportCheck)
+        XCTAssertTrue(system.readQueue(for: 21) === system.readQueue(for: 21), "the same queue each time")
+        XCTAssertFalse(system.readQueue(for: 21) === system.readQueue(for: 41), "another interface, another queue")
+    }
 }

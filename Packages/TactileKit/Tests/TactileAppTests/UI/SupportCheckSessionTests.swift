@@ -214,14 +214,16 @@ final class SupportCheckSessionTests: XCTestCase {
 
     private func desk(sending: SupportSending, target: Bool = true, model given: FakeModel? = nil,
                       transport: FakeTransport = FakeTransport(), system givenSystem: StandInHIDSystem? = nil,
-                      finishing givenFinishing: SupportChecksFinishing? = nil) throws -> Desk {
+                      finishing givenFinishing: SupportChecksFinishing? = nil,
+                      schedule: (@MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void)? = nil) throws -> Desk {
         let model = given ?? FakeModel()
         let system = try givenSystem ?? StandInHIDSystem(try ilitek())
         let finishing = givenFinishing ?? SupportChecksFinishing()
         let temporary = try folder()
         let book = DeviceLogBook()
         let environment = SupportSessionEnvironment(
-            probe: SupportProbe(system: system, logBook: book), sending: sending, transport: transport, logBook: book,
+            probe: SupportProbe(system: system, logBook: book, schedule: schedule), sending: sending, transport: transport,
+            logBook: book,
             mac: { SupportMac(model: "Mac15,6", macOS: "26.1", tactileVersion: "0.7.0", tactileBuild: "512", displays: 2) },
             now: { [unowned self] in self.clock }, ticks: false, temporary: temporary, home: "/Users/someone",
             finishing: finishing)
@@ -371,6 +373,38 @@ final class SupportCheckSessionTests: XCTestCase {
         XCTAssertEqual(model.named, ["begin 1", "begin 2", "end 2", "end 1"])
         XCTAssertEqual(model.deviceWasFreeAtEnd, [true], "taken back once, when the device was free")
         XCTAssertEqual(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek }?.mode, .driving, "never left undriven")
+    }
+
+    /// A read that never returns: the check closed during it waits 30 s, then stops for real. The
+    /// device is closed, the claim given back, "still finishing" clears, and the model takes the
+    /// touchscreen again. Nothing is left stuck. The deadline is a stand-in: no test waits 30 s.
+    func testAReadThatNeverReturnsEndsAtTheDeadline() async throws {
+        var deadlines: [@MainActor () -> Void] = []
+        let system = StandInHIDSystem(try ilitek())
+        let model = FakeModel()
+        let finishing = SupportChecksFinishing()
+        let desk = try desk(sending: .off, model: model, system: system, finishing: finishing,
+                            schedule: { _, work in deadlines.append(work) })
+        system.holdsReads = true
+        desk.session.start()
+        await waitUntil { system.readsHeld == 1 }
+        desk.session.stop()
+        XCTAssertTrue(finishing.isFinishing(UIFixtures.ilitek))
+        XCTAssertEqual(model.named, ["begin 1"])
+        XCTAssertEqual(deadlines.count, 1)
+
+        for work in deadlines { work() }  // the 30 s pass, and the read still hasn't returned
+        await desk.session.starting?.value
+        XCTAssertEqual(model.named, ["begin 1", "end 1"], "the claim is given back")
+        XCTAssertEqual(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek }?.mode, .driving, "taken again")
+        XCTAssertFalse(finishing.isFinishing(UIFixtures.ilitek), "still finishing clears")
+        XCTAssertFalse(system.isHeld, "the device is closed")
+        XCTAssertEqual(system.calls.last, "stopMatching")
+        XCTAssertEqual(model.deviceWasFreeAtEnd, [true])
+
+        system.letReadsGo()  // the read returns at last: nothing more happens
+        await Task.yield()
+        XCTAssertEqual(model.named, ["begin 1", "end 1"])
     }
 
     /// The pane's and the menu's Help Me Support say the same while a check is still letting go.
