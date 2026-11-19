@@ -110,7 +110,7 @@ private final class Outcome<T>: @unchecked Sendable { var value: T? }
 /// If it is still running after `seconds`, or the process has grown by more than 256 MB, the test
 /// process is stopped at once: a parser that loops would otherwise go on taking memory from the
 /// person using this Mac.
-private func returnsQuickly<T>(_ name: String, seconds: TimeInterval = 1,
+private func returnsQuickly<T>(_ name: String, seconds: TimeInterval = TestTiming.limit(1),
                                _ body: @escaping @Sendable () -> T) -> (value: T, seconds: TimeInterval, memoryGrowth: Int64) {
     let memoryLimit: Int64 = 256 << 20
     let outcome = Outcome<T>()
@@ -320,7 +320,7 @@ final class InterfaceDecoderTests: XCTestCase {
         let hugeCount = mouse + [0x09, 0x30, 0x75, 0x20, 0x97, 0xFF, 0xFF, 0xFF, 0xFF, 0x81, 0x02, 0xC0]
         let huge = returnsQuickly("Report Count 0xFFFFFFFF") { InterfaceDecoder(descriptor: hugeCount) }
         XCTAssertNil(huge.value, "a report longer than 65,535 bytes makes the descriptor unusable")
-        XCTAssertLessThan(huge.seconds, 1)
+        XCTAssertLessThan(huge.seconds, TestTiming.limit(1))
         XCTAssertLessThan(huge.memoryGrowth, 16 << 20)
 
         // An X 64 bits wide, signed (Logical Minimum -1), and a report that holds its largest value.
@@ -338,7 +338,7 @@ final class InterfaceDecoderTests: XCTestCase {
             + [0x09, 0x30, 0x75, 0x01, 0x96, 0x00, 0x10, 0x81, 0x02] + [UInt8](repeating: 0xC0, count: 10_001)
         let deep = returnsQuickly("collections nested 10,000 deep") { InterfaceDecoder(descriptor: nested) }
         XCTAssertNil(deep.value, "collections nested more than 64 deep make the descriptor unusable")
-        XCTAssertLessThan(deep.seconds, 1)
+        XCTAssertLessThan(deep.seconds, TestTiming.limit(1))
     }
 
     // MARK: - Descriptors made by hand

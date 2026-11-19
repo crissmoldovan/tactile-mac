@@ -1116,8 +1116,8 @@ final class HIDTouchscreenSourceTests: XCTestCase {
             holder.source = nil
             dropped.fulfill()
         }
-        wait(for: [dropped], timeout: 5)
-        let deadline = Date(timeIntervalSinceNow: 5)
+        wait(for: [dropped], timeout: TestTiming.limit(5))
+        let deadline = Date(timeIntervalSinceNow: TestTiming.limit(5))
         while system.calls.isEmpty, Date() < deadline {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
         }

@@ -254,9 +254,9 @@ final class SupportCheckSessionTests: XCTestCase {
         await session.sendingTask?.value
     }
 
-    /// Waits, a turn at a time, until `condition` holds, for at most a second.
+    /// Waits, a turn at a time, until `condition` holds, for at most a second (more in CI).
     private func waitUntil(_ condition: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(1)
+        let deadline = Date().addingTimeInterval(TestTiming.limit(1))
         while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(5)) }
     }
 
