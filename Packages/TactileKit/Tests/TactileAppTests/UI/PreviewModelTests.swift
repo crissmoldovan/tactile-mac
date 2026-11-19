@@ -356,7 +356,9 @@ final class PreviewModelTests: XCTestCase {
             changed.fulfill()
         }
         model.perform(.setOn(false))
+        let start = Date()
         wait(for: [changed], timeout: TestTiming.limit(1))
+        TestTiming.warn(TestTiming.waitWarning(name, seconds: Date().timeIntervalSince(start), limit: 1))
     }
 
     /// `steadySnapshot` follows `snapshot` by construction, whoever writes it: a write that changes

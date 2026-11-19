@@ -1116,10 +1116,16 @@ final class HIDTouchscreenSourceTests: XCTestCase {
             holder.source = nil
             dropped.fulfill()
         }
+        var start = Date()
         wait(for: [dropped], timeout: TestTiming.limit(5))
+        TestTiming.warn(TestTiming.waitWarning("\(name), dropped", seconds: Date().timeIntervalSince(start), limit: 5))
+        start = Date()
         let deadline = Date(timeIntervalSinceNow: TestTiming.limit(5))
         while system.calls.isEmpty, Date() < deadline {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+        if !system.calls.isEmpty {
+            TestTiming.warn(TestTiming.waitWarning("\(name), stopped matching", seconds: Date().timeIntervalSince(start), limit: 5))
         }
         XCTAssertEqual(system.calls, [.stopMatching])
     }

@@ -169,9 +169,13 @@ final class LiveTests: XCTestCase {
         """
         try Data(text.utf8).write(to: script)
         try DetachedShellLauncher().launch(script)
-        let deadline = Date().addingTimeInterval(TestTiming.limit(10))
+        let start = Date()
+        let deadline = start.addingTimeInterval(TestTiming.limit(10))
         while !FileManager.default.fileExists(atPath: report.path), Date() < deadline {
             Thread.sleep(forTimeInterval: 0.05)
+        }
+        if FileManager.default.fileExists(atPath: report.path) {
+            TestTiming.warn(TestTiming.waitWarning(name, seconds: Date().timeIntervalSince(start), limit: 10))
         }
         let line = try String(contentsOf: report, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
         let parts = line.split(separator: " ").compactMap { Int32($0) }

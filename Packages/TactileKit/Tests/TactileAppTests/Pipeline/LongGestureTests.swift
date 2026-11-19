@@ -189,7 +189,8 @@ final class LongGestureTests: XCTestCase {
     /// printed, and a frame in the last ten seconds typically costs at most half as much again as in
     /// the first ten, with 0.03 ms to spare for the clock at these sizes: a cost that grows with the
     /// gesture, such as work over every sample kept since the fingers landed, is several times that.
-    /// In CI, on a shared runner, the bound has headroom (`TestTiming.costBound`).
+    /// In CI, on a shared runner, the bound has headroom (`TestTiming.costBound`); a cost over the
+    /// strict bound that passes only with it leaves a warning on the run (`TestTiming.costWarning`).
     func testALongGestureCostsTheSameInItsLastSecondAsInItsFirst() async throws {
         for testerOpen in [false, true] {
             for scenario in Scenario.allCases {
@@ -206,6 +207,7 @@ final class LongGestureTests: XCTestCase {
                              name, early, late))
                 XCTAssertLessThanOrEqual(late, TestTiming.costBound(early: early, ratio: 1.5, margin: 0.03),
                                          "\(name): frames cost more as the gesture goes on")
+                TestTiming.warn(TestTiming.costWarning("\(self.name) (\(name))", cost: late, early: early, ratio: 1.5, margin: 0.03))
             }
         }
     }

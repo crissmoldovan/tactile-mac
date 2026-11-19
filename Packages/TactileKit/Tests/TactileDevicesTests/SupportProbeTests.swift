@@ -432,8 +432,7 @@ final class SupportProbeTests: XCTestCase {
 
     /// Waits a moment for `condition`: for what runs off the main thread to call back.
     private func waitUntil(_ condition: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(TestTiming.limit(1))
-        while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+        await TestTiming.waitUntil(name, seconds: 1, condition)
     }
 
     /// A read that never returns: 30 s after the stop was asked for, the probe gives up on it, stops
