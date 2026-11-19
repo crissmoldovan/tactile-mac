@@ -52,6 +52,10 @@ public struct AppInputs: Equatable, Sendable {
     /// The touchscreen checks' claims, each on one touchscreen: Tactile lets go of a touchscreen
     /// while any claim on it is held (see `AppCommand.beginSupportCheck`).
     public var supportChecks: [UUID: TouchscreenID]
+    /// The connections a touchscreen check found had stopped answering (see
+    /// `AppCommand.endSupportCheck`): each is left released until it goes, Tactile is turned off and
+    /// on, or the Mac sleeps and wakes.
+    public var stoppedAnswering: Set<DeviceHandle>
 
     public init(
         appVersion: String, settings: TactileSettings, connected: [ConnectedTouchscreen],
@@ -59,7 +63,8 @@ public struct AppInputs: Equatable, Sendable {
         hasAccessibilityAccess: Bool, isSessionActive: Bool, isAsleep: Bool, isTouchUpRunning: Bool,
         areMissionControlShortcutsOn: Bool, settingsWereSetAside: Bool, isQuitting: Bool, setUp: SetUpSnapshot? = nil,
         lastKnownDisplays: [DisplayFacts]? = nil, canFollowSwipes: Bool = false, launchAtLogin: LaunchAtLogin = .unavailable,
-        setUpMode: SetUpModeSnapshot? = nil, supportChecks: [UUID: TouchscreenID] = [:]
+        setUpMode: SetUpModeSnapshot? = nil, supportChecks: [UUID: TouchscreenID] = [:],
+        stoppedAnswering: Set<DeviceHandle> = []
     ) {
         self.appVersion = appVersion
         self.settings = settings
@@ -80,6 +85,7 @@ public struct AppInputs: Equatable, Sendable {
         self.canFollowSwipes = canFollowSwipes
         self.launchAtLogin = launchAtLogin
         self.supportChecks = supportChecks
+        self.stoppedAnswering = stoppedAnswering
     }
 }
 
@@ -127,8 +133,8 @@ public struct Driving: Equatable, Sendable {
 
 /// Which row of the mode table decided a touchscreen's mode, for the log.
 public enum ModeRule: String, Sendable {
-    case quitting, tactileOff, noAccessibility, sessionNotActive, asleep, supportCheck, noRecord, settingUp, offLeftToMacOS,
-        offIgnoringTouches, notPaired, displayNotConnected, touchesUnreadable, mouseModeShared, paired
+    case quitting, tactileOff, noAccessibility, sessionNotActive, asleep, supportCheck, stoppedAnswering, noRecord, settingUp,
+        offLeftToMacOS, offIgnoringTouches, notPaired, displayNotConnected, touchesUnreadable, mouseModeShared, paired
 }
 
 /// What one connected touchscreen should be doing.
@@ -179,6 +185,7 @@ public struct Resolution: Equatable, Sendable {
 /// | 4 | The session is not active | released | released | as it would otherwise be |
 /// | 4a | The Mac is going to sleep or asleep | released | released | as it would otherwise be |
 /// | 4b | A touchscreen check holds a claim on it (`supportChecks`) | released | released | as it would otherwise be |
+/// | 4b′ | A touchscreen check found this connection had stopped answering (`stoppedAnswering`) | released | released | `stoppedAnswering` |
 /// | 4c | No record: it can't be told apart from another connected touchscreen | held | taken | `notSetUp` |
 /// | 4d | A set-up is running for it, or set-up mode is on, and it can run one (see `canRunSetUp`) | settingUp | taken | as it would otherwise be |
 /// | 4e | Set-up mode is on, and it can't run a set-up | held | taken | as it would otherwise be |
@@ -198,6 +205,9 @@ public struct Resolution: Equatable, Sendable {
 /// can no longer run it, and ends set-up mode. While set-up mode is on no touchscreen drives: every
 /// touch is set-up input (rows 4d and 4e). The touchscreen check's touchscreen is let go (row 4b),
 /// so the check can take it exactly as Tactile does, and can't run a set-up until the check ends.
+/// One the check found had stopped answering stays let go (row 4b′), whatever else changes, and runs
+/// no set-up: nothing takes it on the main thread until it is plugged in again, Tactile is turned off
+/// and on, or the Mac sleeps and wakes.
 ///
 /// Never a guess: a pairing's display is found by `DisplayMatcher` alone, given every stored
 /// pairing, of connected and remembered touchscreens alike, which never gives two touchscreens one
@@ -726,6 +736,7 @@ private struct World {
         if !inputs.isSessionActive { return released(.sessionNotActive) }
         if inputs.isAsleep { return released(.asleep) }
         if inputs.supportChecks.values.contains(screen.id) { return released(.supportCheck) }
+        if let device = screen.connected, inputs.stoppedAnswering.contains(device.handle) { return released(.stoppedAnswering) }
         if !screen.hasRecord { return held(.noRecord) }
         if inputs.setUp?.touchscreen == screen.id || inputs.setUpMode != nil, canRunSetUp(screen) {
             // Taken, its touches for the flow or the mode: never a pipeline, never the pointer.
@@ -770,6 +781,7 @@ private struct World {
         if device.status.touchOrigin == .unreadable { return false }
         if macOSAlsoHandles(screen) { return false }
         if inputs.supportChecks.values.contains(screen.id) { return false }
+        if inputs.stoppedAnswering.contains(device.handle) { return false }
         return true
     }
 
@@ -848,7 +860,9 @@ private struct World {
                 notes.append(.macOSIgnoresIt)
             }
 
-            if !inputs.settings.isOn {
+            if inputs.stoppedAnswering.contains(device.handle) {
+                status = .stoppedAnswering
+            } else if !inputs.settings.isOn {
                 status = .tactileOff
             } else if !inputs.hasAccessibilityAccess {
                 status = .accessibilityMissing
@@ -1147,6 +1161,7 @@ extension World {
         guard let device = screen.connected else { return .notConnected }
         if !inputs.settings.isOn { return .tactileOff }
         if !inputs.hasAccessibilityAccess { return .accessibilityMissing }
+        if inputs.stoppedAnswering.contains(device.handle) { return .stoppedAnswering }
         if !screen.hasRecord { return .cannotBeToldApart }
         if device.status.touchOrigin == .unreadable { return .touchesCannotBeRead }
         if macOSAlsoHandles(screen) { return .macOSAlsoHandlesIt }

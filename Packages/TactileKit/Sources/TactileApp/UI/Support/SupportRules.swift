@@ -30,12 +30,17 @@ enum SupportCheckAvailability: Equatable, Sendable {
     /// An earlier check of it was closed during a read, and hasn't let go yet: a new one couldn't
     /// open it. It clears by itself once that check has let go (`SupportChecksFinishing`).
     case lastCheckFinishing
+    /// An earlier check found it had stopped answering: taking it again could wait for it for good.
+    /// It clears when it is plugged in again (`TouchscreenStatus.stoppedAnswering`, and
+    /// `SupportChecksFinishing` for a device Tactile doesn't list).
+    case stoppedAnswering
 
     /// Any connected touchscreen, whatever Tactile makes of it (one it can't use, or can only share
-    /// with macOS, is just the kind to check), unless a set-up runs or, `finishing`, an earlier check
-    /// of it is still letting go.
+    /// with macOS, is just the kind to check), unless it has stopped answering, a set-up runs or,
+    /// `finishing`, an earlier check of it is still letting go.
     static func of(_ touchscreen: TouchscreenSnapshot, in snapshot: AppSnapshot, finishing: Bool = false) -> SupportCheckAvailability {
         guard touchscreen.isConnected else { return .notConnected }
+        if touchscreen.status == .stoppedAnswering { return .stoppedAnswering }
         if snapshot.setUp != nil || snapshot.setUpMode != nil { return .setUpRunning }
         return available.whileFinishing(finishing)
     }

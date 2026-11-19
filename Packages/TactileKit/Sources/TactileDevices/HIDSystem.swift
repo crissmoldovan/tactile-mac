@@ -23,6 +23,12 @@ protocol HIDSystem: AnyObject {
     /// Closes an interface opened with `open`, with the same `exclusive`.
     @discardableResult
     func close(_ id: HIDInterfaceID, exclusive: Bool) -> IOReturn
+    /// Closes an interface opened with `open` off the main thread, on a queue of its own, and calls
+    /// `done` on the main thread with what the close returned: for a device that has stopped
+    /// answering, which a close on the main thread could wait for. The system lets go of the
+    /// interface at once: nothing it does on the main thread afterwards, stopping the matching
+    /// included, touches it again.
+    func closeInBackground(_ id: HIDInterfaceID, exclusive: Bool, then done: @escaping @MainActor (IOReturn) -> Void)
     /// Whether the interface has the Input Mode feature (0x0D/0x52). Asked while it is open.
     func hasInputMode(_ id: HIDInterfaceID) -> Bool
     /// Reads one whole feature report (GET_REPORT), asking for exactly `length` bytes (the report

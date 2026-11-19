@@ -134,6 +134,11 @@ public struct SupportRawReport: Equatable, Sendable {
 ///   take wrote a 2, best effort. Either way `onGone` is called with what was written. During a
 ///   read, the closing waits for the read, as a release and a stop do: the probe keeps track of the
 ///   read in flight itself, even once the take has ended.
+/// - **A read that never returns.** `stopDeadline` after a stop asked for during a read, the probe
+///   gives up on it: the device has stopped answering, and nothing more is asked of it on the main
+///   thread. Each interface open is closed off it (`HIDSystem.closeInBackground`), nothing is
+///   written (the reads come before the write), and the matching stops without touching it. The
+///   check learns it from `hasStoppedAnswering(_:)`.
 /// - Every step is written in the log book (`DeviceLogBook`), keyed by `SupportDevice.logKey`.
 ///
 /// The touchscreen source must have let the device go first (the model releases a touchscreen while
@@ -163,6 +168,8 @@ public final class SupportProbe {
     private var pendingRead: CheckedContinuation<FeatureReportRead, Never>?
     /// Runs work after a delay on the main actor: the main queue's timer, or the tests' stand-in.
     private let schedule: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void
+    /// The devices given up on (`giveUp(on:)`), by `SupportDevice.id`.
+    private var stoppedAnswering: Set<String> = []
 
     /// How long after a stop asked for during a read the probe waits for the read. IOKit's own HID
     /// request timeout (about 5 s on USB) normally ends a read long before; this is for one that
@@ -182,6 +189,9 @@ public final class SupportProbe {
         var isReading = false
         /// A release was asked for while a read was under way: the take does it when the read returns.
         var releaseAfterRead = false
+        /// Its read never returned, and the probe gave up on it: everything was closed off the main
+        /// thread, and nothing more is asked of it.
+        var gaveUp = false
 
         init(device: SupportDevice, onReport: @escaping @MainActor (SupportRawReport) -> Void,
              onGone: @escaping @MainActor (SupportSwitches.ModeWrite?) -> Void) {
@@ -210,6 +220,12 @@ public final class SupportProbe {
     /// Every device the check can check, connected now, in the order they arrived.
     public var devices: [SupportDevice] {
         SupportDevices.group(Array(interfaces.values))
+    }
+
+    /// Whether the probe gave up on a read of `device` that never returned (`stopDeadline`): it has
+    /// stopped answering, and anything that takes it on the main thread could wait for it for good.
+    public func hasStoppedAnswering(_ device: SupportDevice) -> Bool {
+        stoppedAnswering.contains(device.id)
     }
 
     /// Starts listing. Every device connected now is listed before it returns.
@@ -341,13 +357,28 @@ public final class SupportProbe {
     }
 
     /// The deadline after a stop during a read: if that read is still in flight, the probe stops for
-    /// real. The device is closed under the read, the one time that is accepted: a read that hasn't
-    /// returned this long after IOKit's own timeout never will, and holding the device for good would
-    /// keep Tactile from its touchscreen. The take ends, as after a read that failed.
+    /// real. A read that hasn't returned this long after IOKit's own timeout never will: the device
+    /// has stopped answering. It is closed under the read, the one time that is accepted, and off the
+    /// main thread, so the main thread never waits on it. Nothing else is asked of it: no reports
+    /// were started and nothing was written (the reads come before both). The take ends, as after a
+    /// read that failed, and the probe stops without touching it.
     private func giveUp(on taken: Taken) {
         guard readInFlight === taken, pendingRead != nil else { return }
-        log.error("Support check of \(taken.device.usbID, privacy: .public): the read hasn't returned \(Int(Self.stopDeadline), privacy: .public) s after the check was stopped; closing the device under it")
-        note(taken.device, "the read hasn't returned \(Int(Self.stopDeadline)) s after the check was stopped; closing the device under it")
+        let device = taken.device
+        log.error("Support check of \(device.usbID, privacy: .public): the read hasn't returned \(Int(Self.stopDeadline), privacy: .public) s after the check was stopped: it has stopped answering; closing it off the main thread")
+        note(device, "the read hasn't returned \(Int(Self.stopDeadline)) s after the check was stopped: it has stopped answering. Closing it off the main thread")
+        stoppedAnswering.insert(device.id)
+        taken.gaveUp = true
+        let open = taken.open
+        taken.open = []
+        for interface in open {
+            let role = device.interfaces.first { $0.id == interface.id }?.role.rawValue ?? "other"
+            system.closeInBackground(interface.id, exclusive: interface.exclusive) { [log, logBook] result in
+                log.info("Support check of \(device.usbID, privacy: .public): its \(role, privacy: .public) interface closed off the main thread, IOReturn \(IOResult.text(result), privacy: .public)")
+                guard let key = device.logKey else { return }
+                logBook.note(key, category: "support", "Support check: its \(role) interface closed off the main thread (IOReturn \(IOResult.text(result)))")
+            }
+        }
         readReturned(FeatureReportRead(result: IOResult.timeout, length: 0, seconds: Self.stopDeadline))
     }
 
@@ -356,9 +387,9 @@ public final class SupportProbe {
     private func stillTaking(_ taken: Taken) -> Bool {
         if taken.releaseAfterRead {
             // Asked to let go, or one interface went, while the read was under way. Nothing has been
-            // written yet: the reads come before the write.
+            // written yet: the reads come before the write. Given up on, it was closed already.
             if self.taken === taken { self.taken = nil }
-            _ = close(taken, writingBack: true)
+            if !taken.gaveUp { _ = close(taken, writingBack: true) }
             if stopAfterRead { finishStopping() }
             return false
         }

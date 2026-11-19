@@ -58,8 +58,8 @@ private extension FakeHIDSystem.Call {
     var interfaceID: HIDInterfaceID? {
         switch self {
         case .startMatching, .stopMatching: return nil
-        case .open(let id, _), .close(let id, _), .hasInputMode(let id), .readFeatureReport(let id, _, _),
-             .writeInputMode(let id, _), .startReports(let id, _), .stopReports(let id): return id
+        case .open(let id, _), .close(let id, _), .closeInBackground(let id, _), .hasInputMode(let id),
+             .readFeatureReport(let id, _, _), .writeInputMode(let id, _), .startReports(let id, _), .stopReports(let id): return id
         }
     }
 }

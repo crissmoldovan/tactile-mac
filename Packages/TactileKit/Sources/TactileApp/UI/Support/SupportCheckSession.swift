@@ -48,6 +48,11 @@ struct SupportSessionEnvironment {
 /// The checks closed during a read that haven't let go of their device yet: a new check of the same
 /// device couldn't open it, so Start Check, and Help Me Support in the pane and the menu, wait for
 /// them (`SupportCheckAvailability.lastCheckFinishing`). Each clears by itself when its check lets go.
+///
+/// It also keeps the devices a check found had stopped answering, by the IDs of their interfaces, so
+/// that no new check of a device Tactile doesn't list takes it again
+/// (`SupportCheckAvailability.stoppedAnswering`). Plugged in again, a device's interfaces have new
+/// IDs. A touchscreen Tactile lists goes by the model's status instead.
 @MainActor
 @Observable
 final class SupportChecksFinishing {
@@ -55,6 +60,17 @@ final class SupportChecksFinishing {
 
     private var touchscreens: [TouchscreenID: Int] = [:]
     private var devices: [String: Int] = [:]
+    private var stoppedAnswering: Set<UInt64> = []
+
+    /// A check found `device` had stopped answering.
+    func stoppedAnswering(_ device: SupportDevice) {
+        stoppedAnswering.formUnion(device.interfaces.map(\.id))
+    }
+
+    /// Whether a check found this connection of `device` had stopped answering.
+    func hasStoppedAnswering(_ device: SupportDevice) -> Bool {
+        device.interfaces.contains { stoppedAnswering.contains($0.id) }
+    }
 
     func isFinishing(_ touchscreen: TouchscreenID) -> Bool { touchscreens[touchscreen, default: 0] > 0 }
     func isFinishing(device: String) -> Bool { devices[device, default: 0] > 0 }
@@ -81,6 +97,10 @@ final class SupportChecksFinishing {
 /// - **Tactile takes the touchscreen back** once the check has let the device go, on every way out,
 ///   and never while the check still holds it (a read can be under way off the main thread). A check
 ///   closed during a read is noted in `SupportChecksFinishing` until then.
+/// - **A device that stopped answering** (a read that never returned, given up on
+///   `SupportProbe.stopDeadline` after the stop): the claim is given back saying so, and Tactile
+///   leaves the touchscreen released, its status saying so; no new check takes the device until it
+///   is plugged in again (`SupportCheckAvailability.stoppedAnswering`).
 /// - **An interrupted check** (sleep, unplugging, a device that couldn't be opened) has no verdict
 ///   and no report: the person tries again.
 /// - **Sending** asks the site whether it takes reports only when the person presses Send. Stop
@@ -169,10 +189,14 @@ final class SupportCheckSession {
     }
 
     /// Whether Start Check can go ahead now: for a touchscreen Tactile lists, as the model's snapshot
-    /// says (no set-up running); always for a device it doesn't.
+    /// says (no set-up running, and it hasn't stopped answering); for a device it doesn't, unless a
+    /// check found it had stopped answering.
     var startAvailability: SupportCheckAvailability {
         let deviceFinishing = device.map { environment.finishing.isFinishing(device: $0.id) } ?? false
-        guard let touchscreen else { return SupportCheckAvailability.available.whileFinishing(deviceFinishing) }
+        guard let touchscreen else {
+            if let device, environment.finishing.hasStoppedAnswering(device) { return .stoppedAnswering }
+            return SupportCheckAvailability.available.whileFinishing(deviceFinishing)
+        }
         guard let snapshot = snapshot(), let listed = snapshot.touchscreens.first(where: { $0.id == touchscreen }) else {
             return .notConnected
         }
@@ -210,6 +234,10 @@ final class SupportCheckSession {
             await check.start(at: environment.now())
             isTaking = false
             now = environment.now()
+            if check.deviceStoppedAnswering {
+                InterfaceLog.log.error("touchscreen check: \(check.device.usbID, privacy: .public) stopped answering; it isn't taken again until it is plugged in again")
+                environment.finishing.stoppedAnswering(check.device)
+            }
             if check.stage == .finished {
                 giveBack()
             } else if environment.ticks {
@@ -285,11 +313,12 @@ final class SupportCheckSession {
         if !isTaking { giveBack() }
     }
 
-    /// Tactile takes its touchscreen back, once.
+    /// Tactile takes its touchscreen back, once; or, when the device stopped answering, leaves it
+    /// released, saying so.
     private func giveBack() {
         guard holdsTouchscreen else { return }
         holdsTouchscreen = false
-        perform(.endSupportCheck(claim: claim))
+        perform(.endSupportCheck(claim: claim, deviceStoppedAnswering: check?.deviceStoppedAnswering ?? false))
     }
 
     // MARK: - The sheet

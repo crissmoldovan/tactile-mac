@@ -65,8 +65,15 @@ public enum Wording {
             return "Display not connected: \(name). It resumes when the display returns."
         case .pairedWith(let name, let detail):
             return "Paired with \(displayLabel(name: name, detail: detail))"
+        case .stoppedAnswering:
+            return stoppedAnswering
         }
     }
+
+    /// A touchscreen a check found had stopped answering: its status line, and why it can't be set
+    /// up or checked again.
+    public static let stoppedAnswering = "Stopped answering. Unplug it and plug it back in."
+    static let itStoppedAnswering = "It stopped answering. Unplug it and plug it back in."
 
     /// A line beneath the status line, for something that limits how a touchscreen works; for
     /// `macOSIgnoresIt`, the footnote beside When off.
@@ -118,6 +125,7 @@ public enum Wording {
         case .notSetUp: state = "Not set up"
         case .displayNotConnected(let name): state = "Display not connected: \(name)"
         case .pairedWith(let name, _): state = "Paired with \(name)"
+        case .stoppedAnswering: state = "Stopped answering"
         }
         return ([state] + menuNotes(status, notes: notes)).joined(separator: " · ")
     }
@@ -126,7 +134,7 @@ public enum Wording {
     /// touches (not connected, off, or left to macOS), where they limit nothing.
     static func menuNotes(_ status: TouchscreenStatus, notes: [TouchscreenNote]) -> [String] {
         switch status {
-        case .notConnected, .tactileOff, .accessibilityMissing, .off: return []
+        case .notConnected, .tactileOff, .accessibilityMissing, .off, .stoppedAnswering: return []
         case .notSetUp, .displayNotConnected, .pairedWith: return notes.compactMap(menuNote)
         }
     }
@@ -147,6 +155,7 @@ public enum Wording {
         case .off: return "Off"
         case .notConnected: return "Not connected"
         case .tactileOff, .accessibilityMissing: return "Left to macOS"
+        case .stoppedAnswering: return "Stopped answering"
         }
     }
 
@@ -180,6 +189,7 @@ public enum Wording {
         case .notSetUp: return "not set up"
         case .displayNotConnected: return "display not connected"
         case .pairedWith: return touchscreen.mode == .driving ? "driving" : "not driving"
+        case .stoppedAnswering: return "stopped answering"
         }
     }
 
@@ -346,6 +356,7 @@ public enum Wording {
         case .noExternalDisplay: return "Connect an external display first."
         case .notNow: return "Set-up can’t begin just now. Try again in a moment."
         case .noDisplayToChoose: return setUpNoDisplayToChoose
+        case .stoppedAnswering: return itStoppedAnswering
         case .unpaired: return "Pair it with a display first."
         case .displayNotConnected: return "Its display isn’t connected."
         }

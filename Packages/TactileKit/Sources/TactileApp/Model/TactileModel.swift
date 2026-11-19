@@ -95,6 +95,9 @@ public final class TactileModel: AppModel, TouchscreenSourceDelegate {
     @ObservationIgnored var inputs: AppInputs
     /// What each connected touchscreen was resolved to last time, by handle.
     @ObservationIgnored private var resolved: [DeviceHandle: ResolvedTouchscreen] = [:]
+    /// The connection each touchscreen check's claim was made on: the one it took, which is the one
+    /// left released if the check says it stopped answering.
+    @ObservationIgnored private var supportCheckConnections: [UUID: DeviceHandle] = [:]
     /// The device state last asked of each connected touchscreen.
     @ObservationIgnored private var requestedStates: [DeviceHandle: DeviceState] = [:]
     /// One pipeline for each driving touchscreen, by handle.
@@ -267,13 +270,23 @@ public final class TactileModel: AppModel, TouchscreenSourceDelegate {
             }
             ModelLog.model.info("A touchscreen check has \(Self.usbAndLocation(id, self.inputs), privacy: .public): letting it go until the check ends")
             inputs.supportChecks[claim] = id
-        case .endSupportCheck(let claim):
+            supportCheckConnections[claim] = resolved.values.first { $0.id == id }?.handle
+        case .endSupportCheck(let claim, let stoppedAnswering):
             guard let id = inputs.supportChecks.removeValue(forKey: claim) else {
                 ModelLog.model.info("A touchscreen check's claim was given back that isn't held: nothing changes")
                 return
             }
-            let stillHeld = inputs.supportChecks.values.contains(id)
-            ModelLog.model.info("A touchscreen check let \(Self.usbAndLocation(id, self.inputs), privacy: .public) go: \(stillHeld ? "another check still holds it" : "taking it back", privacy: .public)")
+            let connection = supportCheckConnections.removeValue(forKey: claim)
+            if stoppedAnswering, let connection, inputs.connected.contains(where: { $0.handle == connection }) {
+                // Taking it would read from it and write to it on the main thread, which could wait
+                // for it for good: left released until it is plugged in again.
+                inputs.stoppedAnswering.insert(connection)
+                ModelLog.model.error("A touchscreen check found \(Self.usbAndLocation(id, self.inputs), privacy: .public) had stopped answering: leaving it released until it is plugged in again, Tactile is turned off and on, or the Mac sleeps and wakes")
+            } else {
+                let stillHeld = inputs.supportChecks.values.contains(id)
+                let words = stoppedAnswering ? "the connection that stopped answering has gone; taking the new one" : "taking it back"
+                ModelLog.model.info("A touchscreen check let \(Self.usbAndLocation(id, self.inputs), privacy: .public) go: \(stillHeld ? "another check still holds it" : words, privacy: .public)")
+            }
         default:
             break
         }
@@ -281,6 +294,7 @@ public final class TactileModel: AppModel, TouchscreenSourceDelegate {
         let settings = Resolver.apply(command, to: inputs)
         if settings != inputs.settings {
             ModelLog.model.info("Command \(String(describing: command), privacy: .public)")
+            if settings.isOn, !inputs.settings.isOn { clearStoppedAnswering(because: "Tactile was turned off and on") }
             inputs.settings = settings
             save()
         }
@@ -383,6 +397,7 @@ public final class TactileModel: AppModel, TouchscreenSourceDelegate {
         requestedStates[handle] = nil
         resolved[handle] = nil
         inputs.lastTakenStatus[handle] = nil
+        inputs.stoppedAnswering.remove(handle)
         lastFrames[handle] = nil
         fingersDown.remove(handle)
         lastFrameTimes[handle] = nil
@@ -473,7 +488,16 @@ public final class TactileModel: AppModel, TouchscreenSourceDelegate {
         guard !hasShutDown else { return }
         ModelLog.model.info("Woke: taking the touchscreens again")
         inputs.isAsleep = false
+        clearStoppedAnswering(because: "the Mac slept and woke")
         resolveAndApply()
+    }
+
+    /// The touchscreens a check found had stopped answering are taken again, as the person asked by
+    /// turning Tactile off and on, or as after any sleep.
+    private func clearStoppedAnswering(because reason: String) {
+        guard !inputs.stoppedAnswering.isEmpty else { return }
+        ModelLog.model.info("\(reason, privacy: .public): taking again the touchscreens that had stopped answering")
+        inputs.stoppedAnswering = []
     }
 
     /// While the displays reconfigure, the source publishes none for a moment: the displays seen

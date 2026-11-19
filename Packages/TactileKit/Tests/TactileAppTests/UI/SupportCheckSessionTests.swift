@@ -60,6 +60,32 @@ final class SupportCheckSessionTests: XCTestCase {
 
         var isHeld: Bool { holders.values.contains { $0 > 0 } }
 
+        /// Written on the queue a close off the main thread runs on, read on the main thread.
+        private final class Closes: @unchecked Sendable {
+            private let lock = NSLock()
+            private var made: [Bool] = []
+            func add(onMainThread: Bool) { lock.withLock { made.append(onMainThread) } }
+            var all: [Bool] { lock.withLock { made } }
+        }
+
+        private let closes = Closes()
+        /// Whether each close made off the main thread ran on the main thread after all, in order.
+        var backgroundClosesOnMainThread: [Bool] { closes.all }
+
+        func closeInBackground(_ id: HIDInterfaceID, exclusive: Bool, then done: @escaping @MainActor (IOReturn) -> Void) {
+            calls.append("closing off the main thread \(id)")
+            let closes = closes
+            DispatchQueue.global(qos: .utility).async {
+                closes.add(onMainThread: Thread.isMainThread)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        self.holders[id] = max(0, self.holders[id, default: 0] - 1)
+                        done(kIOReturnSuccess)
+                    }
+                }
+            }
+        }
+
         func hasInputMode(_ id: HIDInterfaceID) -> Bool { false }
 
         func readFeatureReport(_ id: HIDInterfaceID, reportID: Int, length: Int) -> FeatureReportRead {
@@ -97,7 +123,8 @@ final class SupportCheckSessionTests: XCTestCase {
 
     /// The model as the check sees it: the preview desk's snapshot. As the real one, it lets go of
     /// a touchscreen while any check's claim on it is held (unless told not to let go), and takes it
-    /// back when the last claim goes.
+    /// back when the last claim goes, unless a check said the device stopped answering: then it
+    /// leaves it released, saying so.
     @MainActor
     private final class FakeModel {
         var snapshot = PreviewModel(.desk).snapshot
@@ -114,8 +141,13 @@ final class SupportCheckSessionTests: XCTestCase {
             case .beginSupportCheck(let id, let claim) where letsGo:
                 claims[claim] = id
                 set(id, mode: .released)
-            case .endSupportCheck(let claim):
-                guard let id = claims.removeValue(forKey: claim), !claims.values.contains(id) else { return }
+            case .endSupportCheck(let claim, let stoppedAnswering):
+                guard let id = claims.removeValue(forKey: claim) else { return }
+                if stoppedAnswering, let index = snapshot.touchscreens.firstIndex(where: { $0.id == id }) {
+                    snapshot.touchscreens[index].status = .stoppedAnswering
+                }
+                guard !claims.values.contains(id),
+                      snapshot.touchscreens.first(where: { $0.id == id })?.status != .stoppedAnswering else { return }
                 deviceWasFreeAtEnd.append(isDeviceFree())
                 set(id, mode: .driving)
             default:
@@ -134,7 +166,8 @@ final class SupportCheckSessionTests: XCTestCase {
             return commands.compactMap { command in
                 switch command {
                 case .beginSupportCheck(_, let claim): return "begin \(number(claim))"
-                case .endSupportCheck(let claim): return "end \(number(claim))"
+                case .endSupportCheck(let claim, let stoppedAnswering):
+                    return "end \(number(claim))" + (stoppedAnswering ? ", stopped answering" : "")
                 default: return nil
                 }
             }
@@ -395,16 +428,63 @@ final class SupportCheckSessionTests: XCTestCase {
 
         for work in deadlines { work() }  // the 30 s pass, and the read still hasn't returned
         await desk.session.starting?.value
-        XCTAssertEqual(model.named, ["begin 1", "end 1"], "the claim is given back")
-        XCTAssertEqual(model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek }?.mode, .driving, "taken again")
+        XCTAssertEqual(model.named, ["begin 1", "end 1, stopped answering"], "the claim is given back, saying so")
+        let ilitek = model.snapshot.touchscreens.first { $0.id == UIFixtures.ilitek }
+        XCTAssertEqual(ilitek?.mode, .released, "not taken again")
+        XCTAssertEqual(ilitek?.status, .stoppedAnswering)
+        XCTAssertEqual(model.deviceWasFreeAtEnd, [], "the model never took it back")
         XCTAssertFalse(finishing.isFinishing(UIFixtures.ilitek), "still finishing clears")
+        XCTAssertEqual(desk.session.startAvailability, .stoppedAnswering, "a new check waits for it to be plugged in again")
+        let next = try self.desk(sending: .off, model: model, system: system, finishing: finishing)
+        next.session.start()
+        XCTAssertEqual(next.session.startRefusal, Wording.supportUnavailable(.stoppedAnswering))
+        XCTAssertEqual(model.named, ["begin 1", "end 1, stopped answering"], "no claim is made: the model isn't asked to let go")
+        XCTAssertEqual(Array(system.calls.suffix(3)), ["closing off the main thread 21", "closing off the main thread 22", "stopMatching"],
+                       "closed off the main thread, and nothing else asked of the device")
+        XCTAssertFalse(system.calls.contains("close 21") || system.calls.contains("close 22"), "never closed on the main thread")
+        await waitUntil { !system.isHeld }
         XCTAssertFalse(system.isHeld, "the device is closed")
-        XCTAssertEqual(system.calls.last, "stopMatching")
-        XCTAssertEqual(model.deviceWasFreeAtEnd, [true])
+        XCTAssertEqual(system.backgroundClosesOnMainThread, [false, false])
 
         system.letReadsGo()  // the read returns at last: nothing more happens
         await Task.yield()
-        XCTAssertEqual(model.named, ["begin 1", "end 1"])
+        XCTAssertEqual(model.named, ["begin 1", "end 1, stopped answering"])
+    }
+
+    /// A device Tactile doesn't list that stopped answering: no new check of it starts until it is
+    /// plugged in again, when its interfaces come back under new IDs.
+    func testADeviceThatStoppedAnsweringIsntCheckedAgainUntilItIsPluggedInAgain() async throws {
+        var deadlines: [@MainActor () -> Void] = []
+        let system = StandInHIDSystem(try ilitek())
+        let finishing = SupportChecksFinishing()
+        let first = try desk(sending: .off, target: false, system: system, finishing: finishing,
+                             schedule: { _, work in deadlines.append(work) })
+        system.holdsReads = true
+        first.session.start()
+        await waitUntil { system.readsHeld == 1 }
+        first.session.stop()
+        for work in deadlines { work() }
+        await first.session.starting?.value
+        XCTAssertEqual(first.model.commands, [], "the model has nothing to take back")
+
+        let again = try desk(sending: .off, target: false, system: system, finishing: finishing)
+        XCTAssertEqual(again.session.startAvailability, .stoppedAnswering)
+        let calls = system.calls
+        again.session.start()
+        XCTAssertEqual(again.session.startRefusal, Wording.supportUnavailable(.stoppedAnswering))
+        XCTAssertEqual(Wording.supportUnavailable(.stoppedAnswering), "It stopped answering. Unplug it and plug it back in.")
+        await Task.yield()
+        XCTAssertEqual(system.calls, calls, "nothing is asked of it")
+
+        let replugged = StandInHIDSystem(try ilitek().map { interface in
+            var interface = interface
+            interface.id += 100
+            return interface
+        })
+        let fresh = try desk(sending: .off, target: false, system: replugged, finishing: finishing)
+        XCTAssertEqual(fresh.session.startAvailability, .available, "plugged in again: checked as usual")
+        system.letReadsGo()
+        await Task.yield()
     }
 
     /// The pane's and the menu's Help Me Support say the same while a check is still letting go.
@@ -413,6 +493,9 @@ final class SupportCheckSessionTests: XCTestCase {
         let ilitek = try XCTUnwrap(snapshot.touchscreens.first { $0.id == UIFixtures.ilitek })
         XCTAssertEqual(SupportCheckAvailability.of(ilitek, in: snapshot, finishing: true), .lastCheckFinishing)
         XCTAssertEqual(SupportCheckAvailability.available.whileFinishing(true), .lastCheckFinishing)
+        var stopped = ilitek
+        stopped.status = .stoppedAnswering
+        XCTAssertEqual(SupportCheckAvailability.of(stopped, in: snapshot), .stoppedAnswering, "until it is plugged in again")
         XCTAssertEqual(SupportCheckAvailability.setUpRunning.whileFinishing(true), .setUpRunning)
         XCTAssertEqual(SupportCheckAvailability.available.whileFinishing(false), .available)
     }

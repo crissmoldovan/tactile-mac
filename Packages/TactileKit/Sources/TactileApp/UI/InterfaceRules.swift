@@ -80,7 +80,8 @@ enum StatusIndicator: Equatable, Sendable {
     case needsSetUp
     /// Paired, and its display is away: grey.
     case waiting
-    /// Its touches can't be read, or it is paired and connected but Tactile only holds it: red.
+    /// Its touches can't be read, it is paired and connected but Tactile only holds it, or it has
+    /// stopped answering: red.
     case problem
     /// Not connected, off, or left to macOS: a hollow ring.
     case inactive
@@ -106,6 +107,7 @@ enum StatusIndicator: Equatable, Sendable {
         case .notSetUp: self = .needsSetUp
         case .displayNotConnected: self = .waiting
         case .notConnected, .off, .tactileOff, .accessibilityMissing: self = .inactive
+        case .stoppedAnswering: self = .problem
         }
     }
 }
