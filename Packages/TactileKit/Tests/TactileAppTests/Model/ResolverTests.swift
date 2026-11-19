@@ -107,6 +107,7 @@ final class ResolverTests: XCTestCase {
         XCTAssertTrue(Resolver.canRunSetUp(Desk.stripID, inputs))
         XCTAssertEqual(Resolver.apply(.beginSupportCheck(Desk.ilitekID, claim: claim), to: inputs), inputs.settings, "no setting changes")
         XCTAssertEqual(Resolver.apply(.endSupportCheck(claim: claim), to: inputs), inputs.settings)
+        XCTAssertEqual(Resolver.apply(.endSupportCheck(claim: claim, deviceStoppedAnswering: true), to: inputs), inputs.settings)
 
         inputs.setUpMode = SetUpModeSnapshot(stage: .choosing, displays: [], touchscreens: [], justSetUp: nil, notice: nil)
         XCTAssertEqual(Resolved(inputs).ilitek?.deviceState, .released, "set-up mode doesn't take it back")

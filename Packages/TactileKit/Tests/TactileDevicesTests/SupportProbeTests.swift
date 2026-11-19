@@ -193,8 +193,8 @@ final class SupportProbeTests: XCTestCase {
         probe.stop()
         XCTAssertFalse(system.calls.contains { call in
             switch call {
-            case .open(let id, _), .close(let id, _), .hasInputMode(let id), .readFeatureReport(let id, _, _),
-                 .writeInputMode(let id, _), .startReports(let id, _), .stopReports(let id):
+            case .open(let id, _), .close(let id, _), .closeInBackground(let id, _), .hasInputMode(let id),
+                 .readFeatureReport(let id, _, _), .writeInputMode(let id, _), .startReports(let id, _), .stopReports(let id):
                 return id == SupportDesk.stripVendorID
             case .startMatching, .stopMatching:
                 return false
@@ -407,5 +407,134 @@ final class SupportProbeTests: XCTestCase {
         _ = await taking.value
         XCTAssertTrue(system.calls.contains(.close(SupportDesk.stripMouseID, exclusive: true)))
         XCTAssertFalse(system.calls.contains { if case .writeInputMode = $0 { return true } else { return false } })
+    }
+
+    // MARK: - A read that never returns (CUE-1298)
+
+    /// Stands in for the main queue's timer: holds what is scheduled, and runs it when told.
+    @MainActor
+    private final class Deadlines {
+        private(set) var delays: [TimeInterval] = []
+        private var work: [@MainActor () -> Void] = []
+
+        func schedule(_ delay: TimeInterval, _ job: @escaping @MainActor () -> Void) {
+            delays.append(delay)
+            work.append(job)
+        }
+
+        /// The deadlines pass.
+        func pass() {
+            let due = work
+            work = []
+            for job in due { job() }
+        }
+    }
+
+    /// Waits a moment for `condition`: for what runs off the main thread to call back.
+    private func waitUntil(_ condition: () -> Bool) async {
+        await TestTiming.waitUntil(name, seconds: 1, condition)
+    }
+
+    /// A read that never returns: 30 s after the stop was asked for, the probe gives up on it, stops
+    /// for real, and says so. The device has stopped answering, so nothing more is asked of it on the
+    /// main thread: each interface open is closed off it, nothing is written (the reads come before
+    /// the write), and the matching stops without touching it.
+    func testAReadThatNeverReturnsIsGivenUpOnAtTheDeadline() async throws {
+        let system = FakeHIDSystem(connected: try SupportDesk.all())
+        system.inputModeInterfaces = [SupportDesk.stripTouchID]
+        system.suspendsReads = true
+        let book = DeviceLogBook()
+        let deadlines = Deadlines()
+        let probe = SupportProbe(system: system, logBook: book, schedule: { deadlines.schedule($0, $1) })
+        probe.start()
+        let device = try device(probe, "27c0:0859")
+        let taking = Task { @MainActor in await probe.take(device, onReport: { _ in }, onGone: { _ in }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        system.clearCalls()
+        probe.stop()
+        XCTAssertEqual(system.calls, [], "the read is waited for first")
+        XCTAssertEqual(deadlines.delays, [SupportProbe.stopDeadline])
+        XCTAssertEqual(SupportProbe.stopDeadline, 30)
+        XCTAssertFalse(probe.hasStoppedAnswering(device))
+
+        deadlines.pass()
+        let switches = await taking.value
+        XCTAssertNil(switches, "the take ends")
+        XCTAssertEqual(system.calls, [
+            .closeInBackground(SupportDesk.stripTouchID, exclusive: true),
+            .closeInBackground(SupportDesk.stripMouseID, exclusive: true),
+            .stopMatching,
+        ], "each interface is closed off the main thread, then the matching stops: nothing else is asked of the device")
+        XCTAssertTrue(probe.hasStoppedAnswering(device), "the check is told the device stopped answering")
+        XCTAssertEqual(probe.devices, [])
+
+        await waitUntil { system.backgroundClosesDone == 2 }
+        XCTAssertEqual(system.backgroundCloses.map(\.id).sorted(), [SupportDesk.stripTouchID, SupportDesk.stripMouseID].sorted())
+        XCTAssertEqual(system.backgroundCloses.map(\.onMainThread), [false, false], "the main thread never waits on the device")
+        let lines = book.entries(about: [SupportDesk.stripTouchID]).map(\.text)
+        XCTAssertTrue(lines.contains(
+            "Support check: the read hasn't returned 30 s after the check was stopped: it has stopped answering. Closing it off the main thread"))
+        XCTAssertTrue(lines.contains("Support check: its touch interface closed off the main thread (IOReturn 0x00000000)"))
+        XCTAssertTrue(lines.contains("Support check: its mouse interface closed off the main thread (IOReturn 0x00000000)"))
+
+        system.clearCalls()
+        system.resumeReads()  // the read returns at last: nothing more is asked of the device
+        await Task.yield()
+        XCTAssertEqual(system.calls.filter { $0.touchesTheDevice || $0 == .stopMatching }, [
+            .readFeatureReport(SupportDesk.stripTouchID, reportID: 0x0A, length: 2),
+        ], "only the stuck read itself, returning")
+        XCTAssertFalse(system.calls.contains { if case .close = $0 { return true } else { return false } })
+    }
+
+    /// The read returns before the deadline: the deadline passing later changes nothing.
+    func testADeadlineAfterTheReadReturnedChangesNothing() async throws {
+        let system = FakeHIDSystem(connected: try SupportDesk.all())
+        system.suspendsReads = true
+        let deadlines = Deadlines()
+        let probe = SupportProbe(system: system, schedule: { deadlines.schedule($0, $1) })
+        probe.start()
+        let device = try device(probe, "27c0:0859")
+        let taking = Task { @MainActor in await probe.take(device, onReport: { _ in }, onGone: { _ in }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        probe.stop()
+        system.resumeReads()
+        _ = await taking.value
+        let calls = system.calls
+        deadlines.pass()
+        XCTAssertEqual(system.calls, calls)
+    }
+
+    /// Each device's reads are its own: a read held on one device doesn't hold up a check of another.
+    func testAReadOnAnotherDeviceGoesAheadWhileOneIsHeld() async throws {
+        let system = FakeHIDSystem(connected: try SupportDesk.all())
+        system.suspendsReadsOn = [SupportDesk.stripTouchID]
+        let first = SupportProbe(system: system)
+        let second = SupportProbe(system: system)
+        first.start()
+        second.start()
+        let strip = try device(first, "27c0:0859")
+        let held = Task { @MainActor in await first.take(strip, onReport: { _ in }, onGone: { _ in }) }
+        while system.readsWaiting == 0 { await Task.yield() }
+        let ilitek = await second.take(try device(second, "222a:0001"), onReport: { _ in }, onGone: { _ in })
+        XCTAssertEqual(ilitek?.reads.map(\.reportID), [0x06], "B's read went ahead")
+        XCTAssertEqual(system.readsWaiting, 1, "A's is still held")
+        system.resumeReads()
+        _ = await held.value
+    }
+
+    /// IOKit's system closes off the main thread only an interface it knows; one it doesn't is
+    /// answered at once (made without opening anything).
+    func testClosingOffTheMainThreadAnInterfaceThatIsntKnownSaysSo() {
+        let system = IOKitHIDSystem(matching: .supportCheck)
+        var result: IOReturn?
+        system.closeInBackground(21, exclusive: true) { result = $0 }
+        XCTAssertEqual(result, IOResult.noDevice)
+    }
+
+    /// IOKit's system gives each interface a read queue of its own (made without opening anything).
+    func testEachInterfaceHasAReadQueueOfItsOwn() {
+        let system = IOKitHIDSystem(matching: .supportCheck)
+        XCTAssertTrue(system.readQueue(for: 21) === system.readQueue(for: 21), "the same queue each time")
+        XCTAssertFalse(system.readQueue(for: 21) === system.readQueue(for: 41), "another interface, another queue")
     }
 }

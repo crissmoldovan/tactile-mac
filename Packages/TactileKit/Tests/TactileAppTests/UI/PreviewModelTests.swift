@@ -3,6 +3,7 @@ import TactileScreens
 import XCTest
 
 @testable import TactileApp
+import TactileTestSupport
 
 /// The preview model: the real desk, its variants, and each command applied the obvious way.
 @MainActor
@@ -355,7 +356,9 @@ final class PreviewModelTests: XCTestCase {
             changed.fulfill()
         }
         model.perform(.setOn(false))
-        wait(for: [changed], timeout: 1)
+        let start = Date()
+        wait(for: [changed], timeout: TestTiming.limit(1))
+        TestTiming.warn(TestTiming.waitWarning(name, seconds: Date().timeIntervalSince(start), limit: 1))
     }
 
     /// `steadySnapshot` follows `snapshot` by construction, whoever writes it: a write that changes

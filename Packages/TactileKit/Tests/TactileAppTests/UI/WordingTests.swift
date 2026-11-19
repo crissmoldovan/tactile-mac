@@ -21,6 +21,7 @@ final class WordingTests: XCTestCase {
             (.pairedWith(name: "HDMI", detail: "23.8″ · 2560 × 1440 · above the main display"), .leaveToMacOS,
              "Paired with HDMI — 23.8″ · 2560 × 1440 · above the main display"),
             (.pairedWith(name: "HDMI", detail: ""), .ignoreTouches, "Paired with HDMI"),
+            (.stoppedAnswering, .ignoreTouches, "Stopped answering. Unplug it and plug it back in."),
         ]
         for (status, whenOff, expected) in cases {
             XCTAssertEqual(Wording.statusLine(status, whenOff: whenOff), expected, "\(status)")
@@ -56,6 +57,7 @@ final class WordingTests: XCTestCase {
             (.displayNotConnected(name: "HDMI"), "Display not connected: HDMI"),
             (.pairedWith(name: "12.3FHD", detail: "12.3″ · 1600 × 600 · below the main display"),
              "Paired with 12.3FHD"),
+            (.stoppedAnswering, "Stopped answering"),
         ]
         for (status, expected) in cases {
             XCTAssertEqual(Wording.menuState(status, notes: []), expected, "\(status)")
@@ -78,9 +80,19 @@ final class WordingTests: XCTestCase {
     }
 
     func testTheMenuStateLeavesOutNotesWhileTactileIsNotHandlingTheTouchscreen() {
-        for status in [TouchscreenStatus.tactileOff, .accessibilityMissing, .off, .notConnected] {
+        for status in [TouchscreenStatus.tactileOff, .accessibilityMissing, .off, .notConnected, .stoppedAnswering] {
             XCTAssertFalse(Wording.menuState(status, notes: [.oneFingerOnly]).contains("one finger"), "\(status)")
         }
+    }
+
+    /// A touchscreen a check found had stopped answering, in the menu: its row, and its details.
+    func testATouchscreenThatStoppedAnsweringSaysSoInTheMenu() {
+        var ilitek = UIFixtures.desk.touchscreens[0]
+        ilitek.status = .stoppedAnswering
+        ilitek.mode = .released
+        XCTAssertEqual(Wording.menuRowDetail(for: ilitek), "Stopped answering")
+        XCTAssertEqual(Wording.menuSummary(for: ilitek).components(separatedBy: " · ").last, "stopped answering",
+                       "and no notes: Tactile isn't handling its touches")
     }
 
     func testTheMenuLineForEachTouchscreenOfTheDesk() {

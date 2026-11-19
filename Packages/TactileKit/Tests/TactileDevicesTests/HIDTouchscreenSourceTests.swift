@@ -58,8 +58,8 @@ private extension FakeHIDSystem.Call {
     var interfaceID: HIDInterfaceID? {
         switch self {
         case .startMatching, .stopMatching: return nil
-        case .open(let id, _), .close(let id, _), .hasInputMode(let id), .readFeatureReport(let id, _, _),
-             .writeInputMode(let id, _), .startReports(let id, _), .stopReports(let id): return id
+        case .open(let id, _), .close(let id, _), .closeInBackground(let id, _), .hasInputMode(let id),
+             .readFeatureReport(let id, _, _), .writeInputMode(let id, _), .startReports(let id, _), .stopReports(let id): return id
         }
     }
 }
@@ -1116,10 +1116,16 @@ final class HIDTouchscreenSourceTests: XCTestCase {
             holder.source = nil
             dropped.fulfill()
         }
-        wait(for: [dropped], timeout: 5)
-        let deadline = Date(timeIntervalSinceNow: 5)
+        var start = Date()
+        wait(for: [dropped], timeout: TestTiming.limit(5))
+        TestTiming.warn(TestTiming.waitWarning("\(name), dropped", seconds: Date().timeIntervalSince(start), limit: 5))
+        start = Date()
+        let deadline = Date(timeIntervalSinceNow: TestTiming.limit(5))
         while system.calls.isEmpty, Date() < deadline {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+        if !system.calls.isEmpty {
+            TestTiming.warn(TestTiming.waitWarning("\(name), stopped matching", seconds: Date().timeIntervalSince(start), limit: 5))
         }
         XCTAssertEqual(system.calls, [.stopMatching])
     }

@@ -20,6 +20,7 @@ extension Wording {
         case .notConnected: return "Connect it first."
         case .setUpRunning: return "Not while a set-up runs."
         case .lastCheckFinishing: return "The last check is still finishing. Try again in a moment."
+        case .stoppedAnswering: return itStoppedAnswering
         }
     }
 

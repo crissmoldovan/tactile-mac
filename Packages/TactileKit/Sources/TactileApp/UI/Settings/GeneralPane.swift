@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// General: the warnings, when there are any, each with its button; Tactile on or off, and Launch at
-/// login; diagnostics (debug logging, recording frames, Copy diagnostics); Touchscreen Not Listed?
-/// (`NotListedSection`); Experimental (Swipes follow the fingers); Updates (`UpdatesSection`); the
+/// General, in `order`: the warnings, when there are any, each with its button; Tactile on or off,
+/// and Launch at login; Touchscreen Not Listed? (`NotListedSection`), near the top, where a person
+/// whose touchscreen Tactile doesn't list looks first; diagnostics (debug logging, recording frames,
+/// Copy diagnostics); Experimental (Swipes follow the fingers); Updates (`UpdatesSection`); the
 /// version.
 struct GeneralPane: View {
     var snapshot: AppSnapshot
@@ -10,8 +11,28 @@ struct GeneralPane: View {
     /// The touch devices Tactile doesn't list, in the app; nil where nothing is watched.
     var notListed: NotListedDevices? = nil
 
+    /// General's groups.
+    enum Group: CaseIterable, Hashable {
+        case warnings, tactile, notListed, diagnostics, experimental, updates, version
+    }
+
+    /// The order the groups are shown in.
+    static let order: [Group] = [.warnings, .tactile, .notListed, .diagnostics, .experimental, .updates, .version]
+
     var body: some View {
         Form {
+            ForEach(Self.order, id: \.self) { group in
+                section(group)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(Wording.general)
+    }
+
+    @ViewBuilder
+    private func section(_ group: Group) -> some View {
+        switch group {
+        case .warnings:
             if !snapshot.warnings.isEmpty {
                 Section {
                     ForEach(snapshot.warnings, id: \.self) { warning in
@@ -19,6 +40,7 @@ struct GeneralPane: View {
                     }
                 }
             }
+        case .tactile:
             Section {
                 Toggle(isOn: Binding(get: { snapshot.isOn }, set: { perform(.setOn($0)) })) {
                     Text(Wording.tactile)
@@ -27,6 +49,9 @@ struct GeneralPane: View {
                 .toggleStyle(.switch)
                 LaunchAtLoginRowView(row: LaunchAtLoginRow(snapshot.launchAtLogin), perform: perform)
             }
+        case .notListed:
+            NotListedSection(snapshot: snapshot, perform: perform, list: notListed)
+        case .diagnostics:
             Section {
                 Toggle(isOn: Binding(get: { snapshot.debugLogging }, set: { perform(.setDebugLogging($0)) })) {
                     Text(Wording.debugLogging)
@@ -44,13 +69,15 @@ struct GeneralPane: View {
             } footer: {
                 Footnote(Wording.diagnosticsFootnote)
             }
-            NotListedSection(snapshot: snapshot, perform: perform, list: notListed)
+        case .experimental:
             Section {
                 FollowedSwipesRowView(row: FollowedSwipesRow(snapshot), perform: perform)
             } header: {
                 Text(Wording.experimental)
             }
+        case .updates:
             UpdatesSection()
+        case .version:
             Section {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(Wording.version(snapshot.appVersion))
@@ -61,8 +88,6 @@ struct GeneralPane: View {
                 }
             }
         }
-        .formStyle(.grouped)
-        .navigationTitle(Wording.general)
     }
 }
 

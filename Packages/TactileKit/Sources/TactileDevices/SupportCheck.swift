@@ -308,6 +308,11 @@ public final class SupportCheck {
     /// isn't sent; the person tries again.
     public var wasInterrupted: Bool { interruption != nil }
 
+    /// Whether the probe gave up on a read of the device that never returned, after the check was
+    /// stopped (`SupportProbe.stopDeadline`): it has stopped answering, and nothing should take it
+    /// again until it is plugged in again.
+    public var deviceStoppedAnswering: Bool { probe.hasStoppedAnswering(device) }
+
     // MARK: - Reports
 
     private func makeReaders(opened: Set<UInt64>) {

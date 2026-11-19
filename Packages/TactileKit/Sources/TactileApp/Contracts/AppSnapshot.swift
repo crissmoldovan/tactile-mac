@@ -23,6 +23,10 @@ public enum TouchscreenStatus: Equatable, Codable, Sendable {
     case displayNotConnected(name: String)
     /// Paired and working. The two strings are the display's label: its name and its telling-apart line.
     case pairedWith(name: String, detail: String)
+    /// A touchscreen check gave up on a read that never returned: the device has stopped answering,
+    /// and Tactile leaves it released until it is plugged in again, Tactile is turned off and on, or
+    /// the Mac sleeps and wakes (`AppInputs.stoppedAnswering`).
+    case stoppedAnswering
 }
 
 public enum TouchscreenNote: String, Codable, Sendable {

@@ -49,7 +49,7 @@ let package = Package(
                 "TactileDevices", "TactileUpdates", "TactileSupport", "TactileTestSupport",
             ]
         ),
-        .testTarget(name: "TactileUpdatesTests", dependencies: ["TactileUpdates"]),
+        .testTarget(name: "TactileUpdatesTests", dependencies: ["TactileUpdates", "TactileTestSupport"]),
         .testTarget(
             name: "TactileSupportTests",
             dependencies: ["TactileSupport", "TactileDevices", "TactileReading", "TactileUpdates", "TactileTestSupport"]

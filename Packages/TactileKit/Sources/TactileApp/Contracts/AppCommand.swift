@@ -63,5 +63,11 @@ public enum AppCommand: Equatable, Sendable {
     /// The check with this claim has let the touchscreen go. Only its own claim goes: Tactile takes
     /// the touchscreen back once no claim is left. A claim that isn't held (given back already, or
     /// never accepted) changes nothing.
-    case endSupportCheck(claim: UUID)
+    ///
+    /// `deviceStoppedAnswering`: the check gave up on a read that never returned
+    /// (`SupportProbe.stopDeadline`). The connection it took is then left released, its status
+    /// saying so, and nothing takes it again until it is plugged in again, Tactile is turned off and
+    /// on, or the Mac sleeps and wakes: a device that doesn't answer can't safely be taken on the
+    /// main thread. A connection that went meanwhile leaves the touchscreen's new one alone.
+    case endSupportCheck(claim: UUID, deviceStoppedAnswering: Bool = false)
 }

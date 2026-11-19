@@ -3,6 +3,7 @@ import Foundation
 import TactileGestures
 import XCTest
 @testable import TactileScreens
+import TactileTestSupport
 
 // The desk's displays are `DeskDisplays`, in DisplayMatcherTests.swift.
 
@@ -346,7 +347,9 @@ final class SettingsStoreTests: XCTestCase {
             returned.value = SettingsStore(fileURL: file).load()
             done.fulfill()
         }
-        wait(for: [done], timeout: 10)
+        let start = Date()
+        wait(for: [done], timeout: TestTiming.limit(10))
+        TestTiming.warn(TestTiming.waitWarning(name, seconds: Date().timeIntervalSince(start), limit: 10))
         let result = try XCTUnwrap(returned.value)
         XCTAssertEqual(result.settings, TactileSettings())
         XCTAssertEqual(setAsidePath(result.outcome), folder.appendingPathComponent("settings.json.broken").path)

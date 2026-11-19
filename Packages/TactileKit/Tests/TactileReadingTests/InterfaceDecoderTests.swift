@@ -107,9 +107,10 @@ private func pressedAt(_ position: CGPoint?) -> DecodedReport {
 private final class Outcome<T>: @unchecked Sendable { var value: T? }
 
 /// Runs `body` on a thread of its own (with a secondary thread's small stack) and waits for it.
-/// If it is still running after `seconds`, or the process has grown by more than 256 MB, the test
-/// process is stopped at once: a parser that loops would otherwise go on taking memory from the
-/// person using this Mac.
+/// If it is still running after `TestTiming.limit(seconds)`, or the process has grown by more than
+/// 256 MB, the test process is stopped at once: a parser that loops would otherwise go on taking
+/// memory from the person using this Mac. One that took longer than `seconds` and passed only with
+/// CI's headroom leaves a warning on the run.
 private func returnsQuickly<T>(_ name: String, seconds: TimeInterval = 1,
                                _ body: @escaping @Sendable () -> T) -> (value: T, seconds: TimeInterval, memoryGrowth: Int64) {
     let memoryLimit: Int64 = 256 << 20
@@ -124,7 +125,7 @@ private func returnsQuickly<T>(_ name: String, seconds: TimeInterval = 1,
     while done.wait(timeout: .now() + 0.01) == .timedOut {
         let elapsed = Date().timeIntervalSince(start)
         let growth = memoryFootprint() - before
-        if elapsed > seconds || growth > memoryLimit {
+        if elapsed > TestTiming.limit(seconds) || growth > memoryLimit {
             let message = "\(name): still running after \(String(format: "%.2f", elapsed)) s, "
                 + "with \(growth >> 20) MB more memory; stopping the test process\n"
             FileHandle.standardError.write(Data(message.utf8))
@@ -133,7 +134,9 @@ private func returnsQuickly<T>(_ name: String, seconds: TimeInterval = 1,
     }
     // The worker has signalled, so it has written the value.
     guard let value = outcome.value else { fatalError("\(name): the worker signalled without a value") }
-    return (value, Date().timeIntervalSince(start), memoryFootprint() - before)
+    let elapsed = Date().timeIntervalSince(start)
+    TestTiming.warn(TestTiming.waitWarning("InterfaceDecoderTests, \(name)", seconds: elapsed, limit: seconds))
+    return (value, elapsed, memoryFootprint() - before)
 }
 
 final class InterfaceDecoderTests: XCTestCase {
@@ -320,7 +323,7 @@ final class InterfaceDecoderTests: XCTestCase {
         let hugeCount = mouse + [0x09, 0x30, 0x75, 0x20, 0x97, 0xFF, 0xFF, 0xFF, 0xFF, 0x81, 0x02, 0xC0]
         let huge = returnsQuickly("Report Count 0xFFFFFFFF") { InterfaceDecoder(descriptor: hugeCount) }
         XCTAssertNil(huge.value, "a report longer than 65,535 bytes makes the descriptor unusable")
-        XCTAssertLessThan(huge.seconds, 1)
+        XCTAssertLessThan(huge.seconds, TestTiming.limit(1))
         XCTAssertLessThan(huge.memoryGrowth, 16 << 20)
 
         // An X 64 bits wide, signed (Logical Minimum -1), and a report that holds its largest value.
@@ -338,7 +341,7 @@ final class InterfaceDecoderTests: XCTestCase {
             + [0x09, 0x30, 0x75, 0x01, 0x96, 0x00, 0x10, 0x81, 0x02] + [UInt8](repeating: 0xC0, count: 10_001)
         let deep = returnsQuickly("collections nested 10,000 deep") { InterfaceDecoder(descriptor: nested) }
         XCTAssertNil(deep.value, "collections nested more than 64 deep make the descriptor unusable")
-        XCTAssertLessThan(deep.seconds, 1)
+        XCTAssertLessThan(deep.seconds, TestTiming.limit(1))
     }
 
     // MARK: - Descriptors made by hand

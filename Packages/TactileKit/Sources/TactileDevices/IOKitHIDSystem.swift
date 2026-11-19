@@ -154,6 +154,30 @@ final class IOKitHIDSystem: HIDSystem {
         return IOHIDDeviceClose(device, IOOptionBits(exclusive ? kIOHIDOptionsTypeSeizeDevice : kIOHIDOptionsTypeNone))
     }
 
+    /// Forgets the interface here, as `remove` does for one that has gone, so that nothing on the main
+    /// thread (`stopMatching` included) touches it again, then closes it on a queue made for it, never
+    /// its read queue, which a stuck read holds. A close that never returns holds that queue's thread
+    /// and nothing else; the device is kept alive by the box until it returns.
+    func closeInBackground(_ id: HIDInterfaceID, exclusive: Bool, then done: @escaping @MainActor (IOReturn) -> Void) {
+        guard let device = devices[id] else {
+            done(IOResult.noDevice)
+            return
+        }
+        devices[id] = nil
+        inputModeElements[id] = nil
+        openInterfaces[id] = nil
+        if let link = links.removeValue(forKey: id) {
+            link.handler = nil
+            retiredLinks.append(link)
+        }
+        let box = DeviceBox(device: device)
+        let options = IOOptionBits(exclusive ? kIOHIDOptionsTypeSeizeDevice : kIOHIDOptionsTypeNone)
+        DispatchQueue(label: "com.crissmoldovan.tactile.closing.\(id)", qos: .utility).async {
+            let result = IOHIDDeviceClose(box.device, options)
+            DispatchQueue.main.async { MainActor.assumeIsolated { done(result) } }
+        }
+    }
+
     func hasInputMode(_ id: HIDInterfaceID) -> Bool {
         inputModeElement(id) != nil
     }
@@ -168,19 +192,30 @@ final class IOKitHIDSystem: HIDSystem {
         return Self.getReport(device, reportID: reportID, length: length)
     }
 
-    /// Where background reads block: a serial queue of their own, never Swift's cooperative pool,
-    /// which a call that waits up to the HID request timeout must not hold.
-    nonisolated private static let readQueue = DispatchQueue(label: "com.crissmoldovan.tactile.feature-reads", qos: .userInitiated)
+    /// Where each interface's background reads block: a serial queue of its own, never Swift's
+    /// cooperative pool, which a call that waits up to the HID request timeout must not hold; and
+    /// never another device's, so a read stuck on one device doesn't hold up a check of another.
+    private var readQueues: [HIDInterfaceID: DispatchQueue] = [:]
 
-    /// The same call on its own serial queue, as hidapi makes it while the device is scheduled on
-    /// another thread's run loop. The device is kept alive by the box until the call returns. The
-    /// check closes nothing while one is in flight (`SupportProbe`).
+    /// The interface's read queue, made the first time it is asked for.
+    func readQueue(for id: HIDInterfaceID) -> DispatchQueue {
+        if let queue = readQueues[id] { return queue }
+        let queue = DispatchQueue(label: "com.crissmoldovan.tactile.feature-reads.\(id)", qos: .userInitiated)
+        readQueues[id] = queue
+        return queue
+    }
+
+    /// The same call on the interface's own serial queue, as hidapi makes it while the device is
+    /// scheduled on another thread's run loop. The device is kept alive by the box until the call
+    /// returns. The check closes nothing while one is in flight, unless it gives up on it
+    /// (`SupportProbe.stopDeadline`), and then off the main thread (`closeInBackground`).
     func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
         guard let device = devices[id] else { return FeatureReportRead(result: IOResult.noDevice, length: 0, seconds: 0) }
         guard length > 0 else { return FeatureReportRead(result: IOResult.badArgument, length: 0, seconds: 0) }
         let box = DeviceBox(device: device)
+        let queue = readQueue(for: id)
         return await withCheckedContinuation { continuation in
-            Self.readQueue.async {
+            queue.async {
                 continuation.resume(returning: Self.getReport(box.device, reportID: reportID, length: length))
             }
         }

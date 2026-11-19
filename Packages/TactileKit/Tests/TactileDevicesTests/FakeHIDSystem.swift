@@ -11,6 +11,8 @@ final class FakeHIDSystem: HIDSystem {
         case startMatching, stopMatching
         case open(HIDInterfaceID, exclusive: Bool)
         case close(HIDInterfaceID, exclusive: Bool)
+        /// A close asked for off the main thread: recorded when it is asked, on the main thread.
+        case closeInBackground(HIDInterfaceID, exclusive: Bool)
         case hasInputMode(HIDInterfaceID)
         case readFeatureReport(HIDInterfaceID, reportID: Int, length: Int)
         case writeInputMode(HIDInterfaceID, Int)
@@ -23,6 +25,8 @@ final class FakeHIDSystem: HIDSystem {
             case .stopMatching: return "stopMatching"
             case .open(let id, let exclusive): return "open(\(id), \(exclusive ? "exclusive" : "shared"))"
             case .close(let id, let exclusive): return "close(\(id), \(exclusive ? "exclusive" : "shared"))"
+            case .closeInBackground(let id, let exclusive):
+                return "closeInBackground(\(id), \(exclusive ? "exclusive" : "shared"))"
             case .hasInputMode(let id): return "hasInputMode(\(id))"
             case .readFeatureReport(let id, let reportID, let length):
                 return "readFeatureReport(\(id), \(String(format: "0x%02X", reportID)), \(length) bytes)"
@@ -35,7 +39,7 @@ final class FakeHIDSystem: HIDSystem {
         /// Whether the call opens, writes to, or listens to a device.
         var touchesTheDevice: Bool {
             switch self {
-            case .startMatching, .stopMatching, .stopReports, .close: return false
+            case .startMatching, .stopMatching, .stopReports, .close, .closeInBackground: return false
             case .open, .hasInputMode, .readFeatureReport, .writeInputMode, .startReports: return true
             }
         }
@@ -150,6 +154,44 @@ final class FakeHIDSystem: HIDSystem {
         return kIOReturnSuccess
     }
 
+    /// A close made off the main thread, as it was made: which interface, and whether it ran on the
+    /// main thread after all.
+    struct BackgroundClose: Equatable, Sendable {
+        var id: HIDInterfaceID
+        var exclusive: Bool
+        var onMainThread: Bool
+    }
+
+    /// Written on the queue the close runs on, read on the main thread.
+    private final class BackgroundCloses: @unchecked Sendable {
+        private let lock = NSLock()
+        private var made: [BackgroundClose] = []
+        func add(_ close: BackgroundClose) { lock.withLock { made.append(close) } }
+        var all: [BackgroundClose] { lock.withLock { made } }
+    }
+
+    private let closesMade = BackgroundCloses()
+    /// The closes `closeInBackground` has made so far, in the order they ran.
+    var backgroundCloses: [BackgroundClose] { closesMade.all }
+    /// How many of them have called back on the main thread.
+    private(set) var backgroundClosesDone = 0
+
+    /// Closes on a global queue, as IOKit's system closes on one of its own, and calls back on the
+    /// main thread.
+    func closeInBackground(_ id: HIDInterfaceID, exclusive: Bool, then done: @escaping @MainActor (IOReturn) -> Void) {
+        calls.append(.closeInBackground(id, exclusive: exclusive))
+        let closes = closesMade
+        DispatchQueue.global(qos: .utility).async {
+            closes.add(BackgroundClose(id: id, exclusive: exclusive, onMainThread: Thread.isMainThread))
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self.backgroundClosesDone += 1
+                    done(kIOReturnSuccess)
+                }
+            }
+        }
+    }
+
     func hasInputMode(_ id: HIDInterfaceID) -> Bool {
         calls.append(.hasInputMode(id))
         return inputModeInterfaces.contains(id)
@@ -175,8 +217,11 @@ final class FakeHIDSystem: HIDSystem {
         for read in waiting { read.resume() }
     }
 
+    /// Background reads on these interfaces wait for `resumeReads()`, whatever `suspendsReads` says.
+    var suspendsReadsOn: Set<HIDInterfaceID> = []
+
     func readFeatureReportInBackground(_ id: HIDInterfaceID, reportID: Int, length: Int) async -> FeatureReportRead {
-        if suspendsReads { await withCheckedContinuation { pendingReads.append($0) } }
+        if suspendsReads || suspendsReadsOn.contains(id) { await withCheckedContinuation { pendingReads.append($0) } }
         return readFeatureReport(id, reportID: reportID, length: length)
     }
 

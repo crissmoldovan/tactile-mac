@@ -123,6 +123,7 @@ public enum Diagnostics {
         case .notSetUp: return "not set up"
         case .displayNotConnected(let name): return "display not connected (\(name))"
         case .pairedWith(let name, let detail): return "paired with \(name) — \(detail)"
+        case .stoppedAnswering: return "stopped answering during a touchscreen check; left released until it is plugged in again"
         }
     }
 

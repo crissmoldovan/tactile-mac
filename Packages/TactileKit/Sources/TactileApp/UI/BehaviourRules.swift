@@ -32,6 +32,9 @@ enum SetUpAvailability: Equatable, Sendable {
         /// Its touches come from its mouse interface and macOS still sees it (Tactile couldn't take it
         /// for itself): the model refuses every set-up of it, paired or not.
         case macOSAlsoHandlesIt
+        /// A touchscreen check found it had stopped answering: it is left released until it is
+        /// plugged in again (`TouchscreenStatus.stoppedAnswering`).
+        case stoppedAnswering
         /// Set Up by Touch…: there is no external display at all.
         case noExternalDisplay
         /// Set Up by Touch…: everything the interface can see allows it, and the model says the mode
@@ -111,6 +114,7 @@ enum SetUpAvailability: Equatable, Sendable {
         guard snapshot.isOn else { return .tactileOff }
         guard !snapshot.warnings.contains(.accessibilityMissing) else { return .accessibilityMissing }
         guard touchscreen.canChangeSettings else { return .cannotBeToldApart }
+        guard touchscreen.status != .stoppedAnswering else { return .stoppedAnswering }
         guard !touchscreen.notes.contains(.touchesCannotBeRead) else { return .touchesCannotBeRead }
         guard !touchscreen.macOSAlsoHandlesIt else { return .macOSAlsoHandlesIt }
         return nil

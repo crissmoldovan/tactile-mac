@@ -52,6 +52,12 @@ final class BehaviourRulesTests: XCTestCase {
         ilitek.notes = [.touchesCannotBeRead]
         XCTAssertEqual(SetUpAvailability.full(ilitek, in: snapshot), .unavailable(.touchesCannotBeRead))
         ilitek.notes = []
+        let status = ilitek.status
+        ilitek.status = .stoppedAnswering
+        XCTAssertEqual(SetUpAvailability.full(ilitek, in: snapshot), .unavailable(.stoppedAnswering))
+        XCTAssertEqual(SetUpAvailability.onItsDisplay(ilitek, in: snapshot), .unavailable(.stoppedAnswering))
+        XCTAssertEqual(Wording.setUpUnavailable(.stoppedAnswering), "It stopped answering. Unplug it and plug it back in.")
+        ilitek.status = status
         ilitek.canBeSetUp = false
         XCTAssertEqual(SetUpAvailability.full(ilitek, in: snapshot), .unavailable(.notNow),
                        "everything else allows it: the model's word, just now")

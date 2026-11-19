@@ -133,6 +133,7 @@ final class InterfaceRulesTests: XCTestCase {
             (.off, .inactive),
             (.tactileOff, .inactive),
             (.accessibilityMissing, .inactive),
+            (.stoppedAnswering, .problem),
         ]
         for (status, indicator) in cases {
             touchscreen.status = status
