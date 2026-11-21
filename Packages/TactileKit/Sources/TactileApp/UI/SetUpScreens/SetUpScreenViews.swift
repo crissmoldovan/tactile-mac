@@ -304,7 +304,7 @@ struct SetUpControls: View {
     var screen: SetUpScreen
     var displaySize: CGSize
     var perform: PerformCommand
-    /// The session card's Check This Touchscreen… and Check… (`SetUpModeCheck`).
+    /// The session card's Check This Touchscreen… and Check… (`SetUpSupportCheck`).
     var check: CheckTouchscreen = { _ in }
 
     var body: some View {
@@ -315,12 +315,15 @@ struct SetUpControls: View {
                 SetUpModeControls(overview: overview, mouseHint: screen.mouseHint, scale: scale, perform: perform,
                                   check: check)
             case .size(let choices):
-                SetUpSizeCard(choices: choices, inSetUpMode: screen.inSetUpMode, scale: scale, perform: perform)
+                SetUpSizeCard(choices: choices, inSetUpMode: screen.inSetUpMode, checkOffer: screen.check, scale: scale,
+                              perform: perform, check: check)
             case .check(let canRedo):
-                SetUpCheckCard(canRedo: canRedo, inSetUpMode: screen.inSetUpMode, scale: scale, perform: perform)
+                SetUpCheckCard(canRedo: canRedo, inSetUpMode: screen.inSetUpMode, checkOffer: screen.check, scale: scale,
+                               perform: perform, check: check)
             case .corners, .elsewhere:
                 SetUpCancelCard(isTouched: screen.role.isTouched, inSetUpMode: screen.inSetUpMode,
-                                mouseHint: screen.mouseHint, scale: scale, perform: perform)
+                                mouseHint: screen.mouseHint, checkOffer: screen.check, scale: scale, perform: perform,
+                                check: check)
             }
         }
         .fixedSize()
@@ -333,6 +336,39 @@ extension View {
     /// type beside them.
     func setUpControlSize(_ scale: CGFloat) -> some View {
         controlSize(scale > 1.2 ? .extraLarge : .large)
+    }
+}
+
+/// "Touch not working right?" and Check This Touchscreen…, for `touchscreen`: on a running flow's
+/// cards, and on set-up mode's session card with one touchscreen. A button for the mouse, since touch
+/// may not work. It can't be used, and says why, when the touchscreen couldn't be checked once the
+/// set-up has let go of it (`availability`) or an earlier check of it is still letting go.
+struct SetUpCheckRow: View {
+    var touchscreen: TouchscreenID
+    var availability: SupportCheckAvailability
+    var scale: CGFloat
+    var check: CheckTouchscreen
+
+    var body: some View {
+        let availability = availability.whileFinishing(SupportChecksFinishing.shared.isFinishing(touchscreen))
+        VStack(alignment: .leading, spacing: 4 * scale) {
+            HStack(spacing: 10 * scale) {
+                Text(Wording.setUpModeCheckLine)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 16 * scale)
+                Button { check(touchscreen) } label: {
+                    SetUpButtonLabel(title: Wording.checkThisTouchscreen, scale: scale)
+                }
+                .disabled(availability != .available)
+                .setUpControlSize(scale)
+            }
+            if availability != .available {
+                Text(Wording.supportUnavailable(availability))
+                    .font(.system(size: 12 * scale))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -395,13 +431,16 @@ struct SetUpButtonLabel: View {
     }
 }
 
-/// Cancel (Back, in set-up mode), and how else to end it.
+/// Cancel (Back, in set-up mode), and how else to end it; and Check This Touchscreen… for the
+/// touchscreen being calibrated.
 struct SetUpCancelCard: View {
     var isTouched: Bool
     var inSetUpMode = false
     var mouseHint = Wording.setUpMouseHint
+    var checkOffer: SetUpCheckOffer? = nil
     var scale: CGFloat
     var perform: PerformCommand
+    var check: CheckTouchscreen = { _ in }
 
     var body: some View {
         SetUpCard(scale: scale) {
@@ -415,27 +454,38 @@ struct SetUpCancelCard: View {
                 if isTouched {
                     SetUpMouseHint(text: mouseHint, scale: scale)
                 }
+                if let checkOffer {
+                    Divider()
+                    SetUpCheckRow(touchscreen: checkOffer.touchscreen, availability: checkOffer.availability, scale: scale,
+                                  check: check)
+                }
             }
         }
     }
 }
 
-/// The size card: the question, the sizes reported, another size typed in, and Continue.
+/// The size card: the question, the sizes reported, another size typed in, and Continue; and Check
+/// This Touchscreen… for the touchscreen being set up.
 struct SetUpSizeCard: View {
     var choices: SetUpSizeChoices
     var inSetUpMode = false
+    var checkOffer: SetUpCheckOffer?
     var scale: CGFloat
     var perform: PerformCommand
+    var check: CheckTouchscreen
 
     @State private var choice: SetUpSizeChoices.Choice
     @State private var text: String
     @FocusState private var isTyping: Bool
 
-    init(choices: SetUpSizeChoices, inSetUpMode: Bool = false, scale: CGFloat, perform: @escaping PerformCommand) {
+    init(choices: SetUpSizeChoices, inSetUpMode: Bool = false, checkOffer: SetUpCheckOffer? = nil, scale: CGFloat,
+         perform: @escaping PerformCommand, check: @escaping CheckTouchscreen = { _ in }) {
         self.choices = choices
         self.inSetUpMode = inSetUpMode
+        self.checkOffer = checkOffer
         self.scale = scale
         self.perform = perform
+        self.check = check
         _choice = State(initialValue: choices.initialChoice)
         _text = State(initialValue: choices.initialText)
     }
@@ -467,6 +517,11 @@ struct SetUpSizeCard: View {
                 }
                 .setUpControlSize(scale)
                 SetUpMouseHint(scale: scale)
+                if let checkOffer {
+                    Divider()
+                    SetUpCheckRow(touchscreen: checkOffer.touchscreen, availability: checkOffer.availability, scale: scale,
+                                  check: check)
+                }
             }
             .frame(width: 460 * scale, alignment: .leading)
         }
@@ -547,12 +602,15 @@ struct SetUpSizeCard: View {
     }
 }
 
-/// The check's card: where to touch, and Cancel (Back, in set-up mode), Redo and Done.
+/// The check's card: where to touch, and Cancel (Back, in set-up mode), Redo and Done; and Check This
+/// Touchscreen… for the touchscreen being checked.
 struct SetUpCheckCard: View {
     var canRedo: Bool
     var inSetUpMode = false
+    var checkOffer: SetUpCheckOffer? = nil
     var scale: CGFloat
     var perform: PerformCommand
+    var check: CheckTouchscreen = { _ in }
 
     var body: some View {
         SetUpCard(scale: scale) {
@@ -575,6 +633,11 @@ struct SetUpCheckCard: View {
                     SetUpMouseHint(scale: scale)
                 }
                 .font(.system(size: 12 * scale))
+                if let checkOffer {
+                    Divider()
+                    SetUpCheckRow(touchscreen: checkOffer.touchscreen, availability: checkOffer.availability, scale: scale,
+                                  check: check)
+                }
             }
         }
     }

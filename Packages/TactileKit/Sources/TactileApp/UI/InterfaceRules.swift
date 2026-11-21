@@ -123,16 +123,19 @@ enum StatusIndicator: Equatable, Sendable {
 
 // MARK: - A touchscreen's header
 
-/// What the head of a touchscreen's pane shows beside its name: its status line, unless it says
-/// "Paired with …", which the Display row just beneath says too; and, under its On switch, Check This
-/// Touchscreen… for a connected touchscreen.
+/// What the head of a touchscreen's pane shows with its name: its status dot beside the name, as the
+/// sidebar has it, whatever its status; its status line, unless it says "Paired with …", which the
+/// Display row just beneath says too; and, under its On switch, Check This Touchscreen… for a
+/// connected touchscreen.
 struct TouchscreenHeaderContent: Equatable {
+    var indicator: StatusIndicator
     var showsStatusLine: Bool
     /// Check This Touchscreen…: whether it can be used now; nil when it isn't shown (not connected).
     var check: SupportCheckAvailability?
 
     /// `finishing`: an earlier check of it is still letting go.
     init(_ touchscreen: TouchscreenSnapshot, in snapshot: AppSnapshot, finishing: Bool = false) {
+        indicator = StatusIndicator(touchscreen)
         if case .pairedWith = touchscreen.status, touchscreen.mode != .settingUp {
             showsStatusLine = false
         } else {

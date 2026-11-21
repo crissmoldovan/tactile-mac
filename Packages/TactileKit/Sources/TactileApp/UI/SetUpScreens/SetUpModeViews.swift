@@ -226,7 +226,7 @@ struct SetUpModeSessionView: View {
     var session: SetUpModeSession
     var scale: CGFloat
     var perform: PerformCommand
-    /// Leaves set-up mode, then opens the check (`SetUpModeCheck`).
+    /// Leaves set-up mode, then opens the check (`SetUpSupportCheck`).
     var check: CheckTouchscreen = { _ in }
 
     /// Whether `id` can be checked once set-up mode has let go of it, and no earlier check of it is
@@ -289,30 +289,12 @@ struct SetUpModeSessionView: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// "Touch not working right?": with one touchscreen, Check This Touchscreen… beside it, and why
-    /// it can't be used when it can't; with several, where their Check… is.
+    /// "Touch not working right?": with one touchscreen, Check This Touchscreen… beside it
+    /// (`SetUpCheckRow`); with several, where their Check… is.
     @ViewBuilder private var checkRow: some View {
         switch session.checkOffer {
         case .one(let id)?:
-            let availability = availability(id)
-            VStack(alignment: .leading, spacing: 4 * scale) {
-                HStack(spacing: 10 * scale) {
-                    Text(Wording.setUpModeCheckLine)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 16)
-                    Button { check(id) } label: {
-                        SetUpButtonLabel(title: Wording.checkThisTouchscreen, scale: scale)
-                    }
-                    .disabled(availability != .available)
-                    .setUpControlSize(scale)
-                }
-                if availability != .available {
-                    Text(Wording.supportUnavailable(availability))
-                        .font(.system(size: 12 * scale))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            SetUpCheckRow(touchscreen: id, availability: session.checks[id] ?? .notConnected, scale: scale, check: check)
         case .eachLine?:
             Text(Wording.setUpModeCheckEachLine)
                 .foregroundStyle(.secondary)
@@ -360,9 +342,11 @@ private struct SetUpModeLineView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 8)
+                    // Which display it is on reads in full; a long name gives way first.
                     Text(Wording.setUpModeLine(line.state))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .layoutPriority(1)
                     if let check {
                         Button { onCheck() } label: { SetUpButtonLabel(title: Wording.checkButton, scale: scale) }
                             .disabled(check != .available)

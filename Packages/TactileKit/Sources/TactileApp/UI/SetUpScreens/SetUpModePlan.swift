@@ -14,7 +14,7 @@
 //   Should the chosen display carry it, its "Now touch this screen" goes in a card beside it. For
 //   touch that isn't working right, a way to the touchscreen check, with the mouse: Check This
 //   Touchscreen… with one touchscreen, Check… on each line with several. It leaves set-up mode first
-//   (`SetUpModeCheck`).
+//   (`SetUpSupportCheck`). A running step's cards have their own (`SetUpScreen.check`).
 
 import Foundation
 import TactileScreens
@@ -152,44 +152,6 @@ struct SetUpModeSession: Equatable, Sendable {
     var checkOffer: CheckOffer? {
         guard let first = lines.first else { return nil }
         return lines.count == 1 ? .one(first.id) : .eachLine
-    }
-}
-
-/// What Check This Touchscreen… and Check… on the session card do, with the touchscreen's ID: leave
-/// set-up mode, then open the check (`SetUpModeCheck`). Renders and previews do less.
-typealias CheckTouchscreen = @MainActor (TouchscreenID) -> Void
-
-/// Check This Touchscreen… and Check… on the session card. Set-up mode is left exactly as Finish
-/// leaves it (`cancelSetUp`), keeping whatever was set up in it. Then, once the model's snapshot says
-/// set-up has let go (no set-up mode, no set-up, and the touchscreen no longer being set up), the
-/// check opens for that touchscreen, found again in that snapshot. If set-up still has it (the model
-/// didn't leave), or it has gone, no check opens.
-enum SetUpModeCheck {
-    @MainActor
-    static func leaveThenCheck(
-        _ id: TouchscreenID, perform: PerformCommand, snapshot: () -> AppSnapshot?, open: (SupportTarget) -> Void
-    ) {
-        perform(.cancelSetUp)
-        guard let after = snapshot(), after.setUp == nil, after.setUpMode == nil else {
-            InterfaceLog.log.info("set-up: the check wasn't opened; set-up mode is still on")
-            return
-        }
-        guard let touchscreen = after.touchscreens.first(where: { $0.id == id }), touchscreen.isConnected,
-            touchscreen.mode != .settingUp
-        else {
-            InterfaceLog.log.info("set-up: the check wasn't opened; the touchscreen isn't there now")
-            return
-        }
-        open(SupportTarget(touchscreen))
-    }
-
-    /// The app's: the check's window opens on the main actor's next turn, once the set-up screens,
-    /// which follow the same snapshot, have come down.
-    @MainActor
-    static func leaveThenCheck(_ id: TouchscreenID, model: any AppModel) {
-        leaveThenCheck(id, perform: { model.perform($0) }, snapshot: { model.snapshot }, open: { target in
-            Task { @MainActor in SupportCheckWindow.open(target, perform: { model.perform($0) }) }
-        })
     }
 }
 

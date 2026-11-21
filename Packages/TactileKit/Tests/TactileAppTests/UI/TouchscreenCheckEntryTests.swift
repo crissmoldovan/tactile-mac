@@ -56,9 +56,10 @@ final class TouchscreenCheckEntryTests: XCTestCase {
 
     // MARK: - General
 
+    /// Its order is `GeneralPaneOrderTests`'s; here, that every group it has is shown.
     func testGeneralNoLongerListsTouchDevices() {
-        XCTAssertEqual(GeneralPane.order, [.warnings, .tactile, .diagnostics, .experimental, .updates, .version])
         XCTAssertEqual(Set(GeneralPane.Group.allCases), Set(GeneralPane.order))
+        XCTAssertEqual(GeneralPane.order.count, GeneralPane.Group.allCases.count)
     }
 
     // MARK: - The Touchscreen Check pane
@@ -134,6 +135,41 @@ final class TouchscreenCheckEntryTests: XCTestCase {
         XCTAssertEqual(settingUp.unlisted.first?.reason, "Not while a set-up runs.")
     }
 
+    /// When two states apply to a device Tactile doesn't list, the one that won't clear by itself
+    /// says why: stopped answering, then a set-up running, then a check still letting go.
+    func testTheOrderOfTheStatesOfADeviceNotListed() {
+        let digitiser = device("256c:006d", location: "01300000", kind: .digitizer, interface: 3)
+        let running = PreviewModel(.desk)
+        running.perform(.beginSetUpMode)
+        let idle = UIFixtures.desk
+
+        let stoppedAndFinishing = SupportChecksFinishing()
+        stoppedAndFinishing.stoppedAnswering(digitiser)
+        stoppedAndFinishing.began(touchscreen: nil, device: digitiser.id)
+        XCTAssertEqual(SupportCheckAvailability.of(device: digitiser, in: running.snapshot, finishing: stoppedAndFinishing),
+                       .stoppedAnswering)
+        XCTAssertEqual(SupportCheckAvailability.of(device: digitiser, in: idle, finishing: stoppedAndFinishing), .stoppedAnswering)
+
+        let finishing = SupportChecksFinishing()
+        finishing.began(touchscreen: nil, device: digitiser.id)
+        XCTAssertEqual(SupportCheckAvailability.of(device: digitiser, in: running.snapshot, finishing: finishing), .setUpRunning)
+        XCTAssertEqual(SupportCheckAvailability.of(device: digitiser, in: idle, finishing: finishing), .lastCheckFinishing)
+        finishing.ended(touchscreen: nil, device: digitiser.id)
+        XCTAssertEqual(SupportCheckAvailability.of(device: digitiser, in: idle, finishing: finishing), .available,
+                       "it clears by itself once the check lets go")
+    }
+
+    /// A list given for renders and previews is never watched: starting and stopping it leaves it as
+    /// given, with no probe.
+    func testAFixedListOfDevicesIsNeverWatched() {
+        let devices = [device("256c:006d", location: "01300000", kind: .digitizer, interface: 3)]
+        let fixed = NotListedDevices(fixed: devices)
+        fixed.start()
+        XCTAssertEqual(fixed.devices, devices)
+        fixed.stop()
+        XCTAssertEqual(fixed.devices, devices, "stopping a watched list empties it; a fixed one stays")
+    }
+
     func testThePanesWords() {
         XCTAssertEqual(Wording.checkIntro,
                        "Check what a touchscreen sends. You can then send the results to Tactile’s developer, to help it work fully.")
@@ -179,6 +215,49 @@ final class TouchscreenCheckEntryTests: XCTestCase {
             XCTAssertFalse(Wording.statusLine(for: touchscreen).hasPrefix("Paired with "), name)
             XCTAssertTrue(TouchscreenHeaderContent(touchscreen, in: snapshot).showsStatusLine, name)
         }
+    }
+
+    /// For every touchscreen the fixtures have, in every state: the status line shows exactly when it
+    /// doesn't say "Paired with …", and the status dot beside the name is the sidebar's, so the
+    /// colour stays when the line goes.
+    func testTheHeadersRuleForEveryTouchscreen() throws {
+        var cases: [AppSnapshot] = PreviewModel.Variant.allCases.map { PreviewModel($0).snapshot }
+        let mode = PreviewModel(.desk)
+        mode.perform(.beginSetUpMode)
+        cases.append(mode.snapshot)
+        let flow = PreviewModel(.desk)
+        flow.perform(.beginSetUp(UIFixtures.ilitek, .calibrate))
+        cases.append(flow.snapshot)
+        var held = UIFixtures.desk
+        if let index = held.touchscreens.firstIndex(where: { $0.id == UIFixtures.strip }) {
+            held.touchscreens[index].notes = [.oneFingerOnly, .macOSMayAlsoRespond]
+            held.touchscreens[index].mode = .held
+        }
+        cases.append(held)
+        var unreadable = UIFixtures.desk
+        unreadable.touchscreens[0].notes.append(.touchesCannotBeRead)
+        cases.append(unreadable)
+
+        var seen: Set<String> = []
+        for snapshot in cases {
+            for touchscreen in snapshot.touchscreens {
+                let content = TouchscreenHeaderContent(touchscreen, in: snapshot)
+                let line = Wording.statusLine(for: touchscreen)
+                XCTAssertEqual(content.showsStatusLine, !line.hasPrefix("Paired with "), line)
+                XCTAssertEqual(content.indicator, StatusIndicator(touchscreen), line)
+                seen.insert("\(content.indicator)")
+            }
+        }
+        XCTAssertEqual(seen, ["working", "needsSetUp", "waiting", "problem", "inactive", "settingUp"],
+                       "every colour the dot has")
+
+        let strip = try touchscreen(UIFixtures.strip, in: held)
+        guard case .pairedWith = strip.status else { return XCTFail("the held strip is paired") }
+        XCTAssertFalse(TouchscreenHeaderContent(strip, in: held).showsStatusLine)
+        XCTAssertEqual(TouchscreenHeaderContent(strip, in: held).indicator, .problem, "red, beside its name")
+        let settingUp = try touchscreen(UIFixtures.ilitek, in: mode.snapshot)
+        guard case .pairedWith = settingUp.status else { return XCTFail("paired, and being set up") }
+        XCTAssertTrue(TouchscreenHeaderContent(settingUp, in: mode.snapshot).showsStatusLine)
     }
 
     /// Check This Touchscreen…: for a connected touchscreen only, enabled only when the check can
@@ -257,7 +336,7 @@ final class TouchscreenCheckEntryTests: XCTestCase {
         XCTAssertNotNil(model.snapshot.setUpMode, "back to the overview, the strip set up")
 
         var steps: [String] = []
-        SetUpModeCheck.leaveThenCheck(
+        SetUpSupportCheck.leaveThenCheck(
             UIFixtures.ilitek,
             perform: { command in
                 steps.append("\(command)")
@@ -288,7 +367,7 @@ final class TouchscreenCheckEntryTests: XCTestCase {
         XCTAssertEqual(try session(harness.model.snapshot).checkOffer, .eachLine)
 
         var opened: [TouchscreenID] = []
-        SetUpModeCheck.leaveThenCheck(
+        SetUpSupportCheck.leaveThenCheck(
             DeskFixture.ilitekID, perform: { harness.model.perform($0) }, snapshot: { harness.model.snapshot },
             open: { target in
                 opened.append(target.id)
@@ -312,16 +391,165 @@ final class TouchscreenCheckEntryTests: XCTestCase {
         let model = PreviewModel(.desk)
         model.perform(.beginSetUpMode)
         var opened = false
-        SetUpModeCheck.leaveThenCheck(UIFixtures.ilitek, perform: { _ in }, snapshot: { model.snapshot },
+        SetUpSupportCheck.leaveThenCheck(UIFixtures.ilitek, perform: { _ in }, snapshot: { model.snapshot },
                                       open: { _ in opened = true })
         XCTAssertFalse(opened)
 
         let gone = PreviewModel(.desk)
         gone.perform(.beginSetUpMode)
-        SetUpModeCheck.leaveThenCheck(TouchscreenID(rawValue: "ffff:ffff:"), perform: { gone.perform($0) },
+        SetUpSupportCheck.leaveThenCheck(TouchscreenID(rawValue: "ffff:ffff:"), perform: { gone.perform($0) },
                                       snapshot: { gone.snapshot }, open: { _ in opened = true })
         XCTAssertNil(gone.snapshot.setUpMode, "it still leaves")
         XCTAssertFalse(opened, "a touchscreen that has gone isn't checked")
+    }
+
+    /// After leaving, nothing opens for a touchscreen unplugged as Check was pressed, nor for one set-up
+    /// still has; set-up has ended all the same, and the log says why.
+    func testAfterLeavingNothingOpensForATouchscreenUnpluggedOrStillBeingSetUp() throws {
+        let model = PreviewModel(.desk)
+        model.perform(.beginSetUpMode)
+        XCTAssertEqual(try session(model.snapshot).checkOffer, .eachLine, "the strip's line, with its Check…")
+        var opened = false
+        SetUpSupportCheck.leaveThenCheck(
+            UIFixtures.strip,
+            perform: { command in
+                if command == .cancelSetUp { model.simulate(.touchscreenConnected(UIFixtures.strip, false)) }
+                model.perform(command)
+            },
+            snapshot: { model.snapshot }, open: { _ in opened = true })
+        XCTAssertNil(model.snapshot.setUpMode, "set-up mode ended")
+        XCTAssertEqual(try touchscreen(UIFixtures.strip, in: model.snapshot).isConnected, false, "remembered, not connected")
+        XCTAssertFalse(opened)
+
+        var stillSettingUp = UIFixtures.desk
+        stillSettingUp.touchscreens[0].mode = .settingUp
+        SetUpSupportCheck.leaveThenCheck(stillSettingUp.touchscreens[0].id, perform: { _ in }, snapshot: { stillSettingUp },
+                                         open: { _ in opened = true })
+        XCTAssertFalse(opened, "not while set-up still has it")
+    }
+
+    /// The app's way: the check's window opens on a later turn of the main actor, after the set-up
+    /// screens were told to come down, not over them.
+    func testTheSetUpScreensComeDownBeforeTheCheckOpens() async {
+        let model = PreviewModel(.desk)
+        model.perform(.beginSetUpMode)
+        var events: [String] = []
+        let follower = SnapshotFollower(
+            model: model, showSetUp: { events.append($0.change == .takeDown ? "screens down" : "screens up") },
+            showFirstRun: { _ in })
+        follower.start()
+        XCTAssertEqual(events, ["screens up"])
+        events = []
+        SetUpSupportCheck.leaveThenCheck(UIFixtures.ilitek, model: model, open: { target, _ in
+            events.append("open \(target.id.rawValue)")
+        })
+        XCTAssertEqual(events, [], "both wait for the main actor")
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(events, ["screens down", "open \(UIFixtures.ilitek.rawValue)"])
+        follower.stop()
+    }
+
+    // MARK: - The set-up steps: corners, size and the final touch test
+
+    private func offer(_ id: TouchscreenID) -> SetUpCheckOffer {
+        SetUpCheckOffer(touchscreen: id, availability: .available)
+    }
+
+    /// In set-up mode, every screen of a running step offers Check This Touchscreen… for the
+    /// touchscreen being calibrated: the corners, the size and the final touch test, on the display
+    /// being touched and the others. Between steps the session card has it instead.
+    func testEveryStepOfSetUpModeOffersCheckThisTouchscreen() throws {
+        let model = PreviewModel(.desk)
+        model.perform(.beginSetUpMode)
+        XCTAssertTrue(SetUpScreens.plan(model.snapshot).allSatisfy { $0.check == nil }, "the session card's, between steps")
+        let lg = try XCTUnwrap(UIFixtures.displayID(named: "LG HDR 4K", in: model.snapshot))
+        model.perform(.setUpChoose(displayID: lg))
+        model.simulate(.touch(UIFixtures.ilitek))
+
+        for step in ["corners", "size", "check"] {
+            let plan = SetUpScreens.plan(model.snapshot)
+            XCTAssertNotNil(model.snapshot.setUp, step)
+            XCTAssertEqual(plan.map(\.check), Array(repeating: offer(UIFixtures.ilitek), count: plan.count), step)
+            XCTAssertTrue(plan.contains { $0.displayID == lg && $0.role.isTouched && $0.hasControls }, step)
+            switch step {
+            case "corners": for _ in 0..<4 { model.touchSetUp() }
+            case "size": model.perform(.setUpConfirmSize(inches: nil))
+            default: break
+            }
+        }
+    }
+
+    /// Calibrate Corners… and Test from a pane or the menu run the same screens outside set-up mode:
+    /// they offer it too.
+    func testCalibrateCornersAndTestOfferItToo() throws {
+        let model = PreviewModel(.desk)
+        model.perform(.beginSetUp(UIFixtures.ilitek, .calibrate))
+        var plan = SetUpScreens.plan(model.snapshot)
+        XCTAssertTrue(plan.contains { if case .corners = $0.role { return true } else { return false } })
+        XCTAssertEqual(plan.map(\.check), Array(repeating: offer(UIFixtures.ilitek), count: plan.count))
+        model.perform(.cancelSetUp)
+
+        model.perform(.beginSetUp(UIFixtures.strip, .test))
+        plan = SetUpScreens.plan(model.snapshot)
+        XCTAssertTrue(plan.contains { if case .check = $0.role { return true } else { return false } })
+        XCTAssertEqual(plan.map(\.check), Array(repeating: offer(UIFixtures.strip), count: plan.count))
+
+        var stopped = model.snapshot
+        if let index = stopped.touchscreens.firstIndex(where: { $0.id == UIFixtures.strip }) {
+            stopped.touchscreens[index].status = .stoppedAnswering
+        }
+        XCTAssertEqual(SetUpScreens.plan(stopped).first?.check,
+                       SetUpCheckOffer(touchscreen: UIFixtures.strip, availability: .stoppedAnswering), "and why not")
+    }
+
+    /// Pressing it during a step of set-up mode leaves the whole mode, as Esc does: the step stores
+    /// nothing, what was set up before stays, and then the check opens.
+    func testPressingItDuringAStepLeavesSetUpModeThenOpensTheCheck() throws {
+        let model = PreviewModel(.desk)
+        let hdmi = try touchscreen(UIFixtures.ilitek, in: model.snapshot).pairedDisplayID
+        model.perform(.beginSetUpMode)
+        let lg = try XCTUnwrap(UIFixtures.displayID(named: "LG HDR 4K", in: model.snapshot))
+        model.perform(.setUpChoose(displayID: lg))
+        model.simulate(.touch(UIFixtures.ilitek))
+        model.touchSetUp()
+        guard case .corners? = model.snapshot.setUp?.step else { return XCTFail("in the corners") }
+
+        var steps: [String] = []
+        SetUpSupportCheck.leaveThenCheck(
+            UIFixtures.ilitek,
+            perform: { command in
+                steps.append("\(command)")
+                model.perform(command)
+            },
+            snapshot: { model.snapshot },
+            open: { target in
+                steps.append("open \(target.id.rawValue)")
+                XCTAssertNil(model.snapshot.setUp)
+                XCTAssertNil(model.snapshot.setUpMode)
+            })
+        XCTAssertEqual(steps, ["cancelSetUp", "open \(UIFixtures.ilitek.rawValue)"])
+        XCTAssertEqual(try touchscreen(UIFixtures.ilitek, in: model.snapshot).pairedDisplayID, hdmi,
+                       "the step left stores nothing: still on HDMI")
+    }
+
+    /// The same from Calibrate Corners…, on the model itself: the calibration ends storing nothing,
+    /// the touchscreen drives again, and then the check opens.
+    func testPressingItDuringCalibrateCornersEndsItThenOpensTheCheck() throws {
+        let harness = try deskHarness(self)
+        let before = try Data(contentsOf: harness.settingsURL)
+        harness.model.perform(.beginSetUp(DeskFixture.ilitekID, .calibrate))
+        XCTAssertEqual(SetUpScreens.plan(harness.model.snapshot).first?.check, offer(DeskFixture.ilitekID))
+
+        var opened: [TouchscreenID] = []
+        SetUpSupportCheck.leaveThenCheck(
+            DeskFixture.ilitekID, perform: { harness.model.perform($0) }, snapshot: { harness.model.snapshot },
+            open: { target in
+                opened.append(target.id)
+                XCTAssertNil(harness.model.snapshot.setUp)
+                XCTAssertEqual(harness.touchscreen(DeskFixture.ilitekID)?.mode, .driving, "the calibration has let go of it")
+            })
+        XCTAssertEqual(opened, [DeskFixture.ilitekID])
+        XCTAssertEqual(try Data(contentsOf: harness.settingsURL), before, "nothing stored")
     }
 
     // MARK: - The words

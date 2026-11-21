@@ -310,7 +310,7 @@ public final class SetUpOverlay {
     }
 
     private func checkPressed(_ id: TouchscreenID) {
-        InterfaceLog.log.info("set-up: Check This Touchscreen… or Check… pressed; leaving set-up mode first")
+        InterfaceLog.log.info("set-up: Check This Touchscreen… or Check… pressed; leaving the set-up first")
         check(id)
     }
 

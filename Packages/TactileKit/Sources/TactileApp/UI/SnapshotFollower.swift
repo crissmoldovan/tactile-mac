@@ -83,7 +83,7 @@ final class SnapshotFollower {
                     presentation, perform: { model?.perform($0) },
                     check: { id in
                         guard let model else { return }
-                        SetUpModeCheck.leaveThenCheck(id, model: model)
+                        SetUpSupportCheck.leaveThenCheck(id, model: model)
                     })
             },
             showFirstRun: { [weak model] offer in

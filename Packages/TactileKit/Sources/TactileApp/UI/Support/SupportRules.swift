@@ -55,14 +55,16 @@ enum SupportCheckAvailability: Equatable, Sendable {
         return available.whileFinishing(finishing)
     }
 
-    /// For a device Tactile doesn't list, by the same rule: not once a check found it had stopped
-    /// answering (`stoppedAnswering`), nor while a set-up runs, nor while an earlier check of it is
-    /// still letting go (`finishing`).
-    static func of(device: SupportDevice, in snapshot: AppSnapshot, finishing: Bool = false, stoppedAnswering: Bool = false)
+    /// For a device Tactile doesn't list, by the same rule, in this order: not once a check found it
+    /// had stopped answering, nor while a set-up runs, nor while an earlier check of it is still
+    /// letting go, as `finishing` has them.
+    @MainActor
+    static func of(device: SupportDevice, in snapshot: AppSnapshot, finishing: SupportChecksFinishing)
         -> SupportCheckAvailability
     {
-        if stoppedAnswering { return .stoppedAnswering }
-        return snapshot.setUp != nil || snapshot.setUpMode != nil ? .setUpRunning : available.whileFinishing(finishing)
+        if finishing.hasStoppedAnswering(device) { return .stoppedAnswering }
+        if snapshot.setUp != nil || snapshot.setUpMode != nil { return .setUpRunning }
+        return available.whileFinishing(finishing.isFinishing(device: device.id))
     }
 
     /// This, or `lastCheckFinishing` when it would be available and an earlier check is still
@@ -145,9 +147,7 @@ struct TouchscreenCheckList: Equatable {
         unlisted = SupportDeviceMatching.unlisted(devices, in: snapshot).map { device in
             Unlisted(
                 device: device, name: Wording.supportDeviceName(device), detail: Wording.notListedDetail(device),
-                availability: SupportCheckAvailability.of(
-                    device: device, in: snapshot, finishing: finishing.isFinishing(device: device.id),
-                    stoppedAnswering: finishing.hasStoppedAnswering(device)))
+                availability: SupportCheckAvailability.of(device: device, in: snapshot, finishing: finishing))
         }
     }
 }

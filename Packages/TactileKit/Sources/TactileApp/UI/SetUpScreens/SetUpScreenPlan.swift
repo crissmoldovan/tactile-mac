@@ -2,7 +2,9 @@
 // alone: the interface never decides a step. `SetUpOverlay` puts a screen on every display from this
 // plan, and the renders draw the same plan. A running flow (corners, size, check) is drawn as it
 // always was, its Cancel reading Back in set-up mode; between flows, set-up mode's overview is drawn
-// (`SetUpModePlan.swift`).
+// (`SetUpModePlan.swift`). Every card on these screens offers the touchscreen check, for touch that
+// isn't working right: a running flow's for the touchscreen it calibrates (`SetUpScreen.check`), the
+// session card for the touchscreens in the mode. It leaves the set-up first (`SetUpSupportCheck`).
 
 import CoreGraphics
 import Foundation
@@ -146,6 +148,77 @@ enum SetUpScreenRole: Equatable, Sendable {
     }
 }
 
+/// Check This Touchscreen… on a running flow's cards: the touchscreen the flow calibrates, and
+/// whether it can be checked once the set-up has let go of it (`SupportCheckAvailability.leavingSetUp`).
+/// An earlier check still letting go is the view's to add, as it changes without the snapshot.
+struct SetUpCheckOffer: Equatable, Sendable {
+    var touchscreen: TouchscreenID
+    var availability: SupportCheckAvailability
+
+    init(touchscreen: TouchscreenID, availability: SupportCheckAvailability) {
+        self.touchscreen = touchscreen
+        self.availability = availability
+    }
+
+    /// For `id`, as `snapshot` has it.
+    init(_ id: TouchscreenID, in snapshot: AppSnapshot) {
+        touchscreen = id
+        availability = snapshot.touchscreens.first { $0.id == id }.map { SupportCheckAvailability.leavingSetUp($0) }
+            ?? .notConnected
+    }
+}
+
+/// What Check This Touchscreen… and Check… on the set-up screens' cards do, with the touchscreen's
+/// ID: leave the set-up, then open the check (`SetUpSupportCheck`). Renders and previews do less.
+typealias CheckTouchscreen = @MainActor (TouchscreenID) -> Void
+
+/// Check This Touchscreen… and Check… on the set-up screens' cards: set-up mode's session card, and a
+/// running flow's cards, in set-up mode or from Calibrate Corners… and Test. The set-up is left
+/// exactly as Esc leaves it (`cancelSetUp`): set-up mode ends, keeping whatever was set up in it, and
+/// a flow running ends storing nothing. Then, once the model's snapshot says set-up has let go (no
+/// set-up mode, no set-up, and the touchscreen no longer being set up), the check opens for that
+/// touchscreen, found again in that snapshot. If set-up still has it (the model didn't leave), or it
+/// has gone or been unplugged, no check opens, and the log says why.
+enum SetUpSupportCheck {
+    @MainActor
+    static func leaveThenCheck(
+        _ id: TouchscreenID, perform: PerformCommand, snapshot: () -> AppSnapshot?, open: (SupportTarget) -> Void
+    ) {
+        perform(.cancelSetUp)
+        guard let after = snapshot(), after.setUp == nil, after.setUpMode == nil else {
+            InterfaceLog.log.info("set-up: Check pressed, but the set-up didn't end; no check opened")
+            return
+        }
+        guard let touchscreen = after.touchscreens.first(where: { $0.id == id }) else {
+            InterfaceLog.log.info("set-up ended for Check; no check opened: the touchscreen has gone")
+            return
+        }
+        guard touchscreen.isConnected else {
+            InterfaceLog.log.info("set-up ended for Check; no check opened: the touchscreen isn't connected now")
+            return
+        }
+        guard touchscreen.mode != .settingUp else {
+            InterfaceLog.log.info("set-up ended for Check; no check opened: the touchscreen is still being set up")
+            return
+        }
+        open(SupportTarget(touchscreen))
+    }
+
+    /// The app's. `open` (the check's window) runs on a later turn of the main actor, after the
+    /// snapshot follower's turn, queued as the snapshot changed, has taken the set-up screens down.
+    @MainActor
+    static func leaveThenCheck(
+        _ id: TouchscreenID, model: any AppModel,
+        open: @escaping @MainActor (SupportTarget, @escaping PerformCommand) -> Void = {
+            SupportCheckWindow.open($0, perform: $1)
+        }
+    ) {
+        leaveThenCheck(id, perform: { model.perform($0) }, snapshot: { model.snapshot }, open: { target in
+            Task { @MainActor in open(target, { model.perform($0) }) }
+        })
+    }
+}
+
 /// Where a screen's buttons go.
 enum SetUpControlsPlacement: Equatable, Sendable {
     /// Just below the middle, under the message drawn above it.
@@ -179,6 +252,9 @@ struct SetUpScreen: Equatable, Identifiable, Sendable {
     /// A flow run inside set-up mode: its Cancel reads Back and returns to the overview, and Esc
     /// leaves the whole mode.
     var inSetUpMode = false
+    /// During a flow, Check This Touchscreen… on this screen's card, for the touchscreen it
+    /// calibrates; nil in the overview, whose session card offers the check itself.
+    var check: SetUpCheckOffer? = nil
 
     var id: UInt32 { displayID }
 
@@ -294,6 +370,7 @@ enum SetUpScreens {
         let progress = SetUpProgress(purpose: setUp.purpose, current: step.name)
         let inSetUpMode = snapshot.setUpMode != nil
         let others = snapshot.touchscreens.filter { $0.id != setUp.touchscreen && $0.isConnected }
+        let check = SetUpCheckOffer(setUp.touchscreen, in: snapshot)
         // In set-up mode every touchscreen is held: none can tap a button by mistake.
         func hasControls(_ display: UInt32) -> Bool {
             inSetUpMode || !others.contains { $0.pairedDisplayID == display }
@@ -304,7 +381,8 @@ enum SetUpScreens {
             return SetUpScreen(
                 displayID: display.id, touchscreenName: setUp.touchscreenName, progress: progress,
                 role: isOn ? step.role : elsewhere(step.display, in: snapshot), hasControls: hasControls(display.id),
-                takesKeyboard: false, placement: isOn ? step.placement : .belowCentre, inSetUpMode: inSetUpMode)
+                takesKeyboard: false, placement: isOn ? step.placement : .belowCentre, inSetUpMode: inSetUpMode,
+                check: check)
         }
 
         // The keyboard: on the display being set up; failing that, the first screen with buttons.
