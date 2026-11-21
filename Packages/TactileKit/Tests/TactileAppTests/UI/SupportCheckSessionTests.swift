@@ -186,6 +186,7 @@ final class SupportCheckSessionTests: XCTestCase {
         private var _cancelled: [String] = []
         var available = true
         var uploadStatus = 202
+        var uploadBody = #"{"status":"check-email"}"#
         var holdsStatus = false
         var holdsUpload = false
 
@@ -207,7 +208,7 @@ final class SupportCheckSessionTests: XCTestCase {
             if isStatus {
                 return (Data(#"{"available":\#(available)}"#.utf8), HTTPResult(status: 200, url: request.url))
             }
-            return (Data(#"{"status":"check-email"}"#.utf8), HTTPResult(status: uploadStatus, url: request.url))
+            return (Data(uploadBody.utf8), HTTPResult(status: uploadStatus, url: request.url))
         }
     }
 
@@ -247,12 +248,12 @@ final class SupportCheckSessionTests: XCTestCase {
 
     private func desk(sending: SupportSending, target: Bool = true, model given: FakeModel? = nil,
                       transport: FakeTransport = FakeTransport(), system givenSystem: StandInHIDSystem? = nil,
-                      finishing givenFinishing: SupportChecksFinishing? = nil,
+                      finishing givenFinishing: SupportChecksFinishing? = nil, temporary givenTemporary: URL? = nil,
                       schedule: (@MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void)? = nil) throws -> Desk {
         let model = given ?? FakeModel()
         let system = try givenSystem ?? StandInHIDSystem(try ilitek())
         let finishing = givenFinishing ?? SupportChecksFinishing()
-        let temporary = try folder()
+        let temporary = try givenTemporary ?? folder()
         let book = DeviceLogBook()
         let environment = SupportSessionEnvironment(
             probe: SupportProbe(system: system, logBook: book, schedule: schedule), sending: sending, transport: transport,
@@ -749,6 +750,317 @@ final class SupportCheckSessionTests: XCTestCase {
         XCTAssertEqual(desk.session.sendStage, .unavailable)
     }
 
+    // MARK: - Fitting its window
+
+    // The check's window, its sheet and the file viewer, each laid out by an `NSHostingView` the size
+    // of what shows it, never put in a window, and each part read from its bounds: no larger than
+    // what shows it, its title at the top and its row of buttons at the bottom inside it. On macOS 26
+    // a sheet is drawn inside its window and cut to it, so a part outside is a part nobody sees.
+
+    /// The check window's content, as `SupportCheckWindowFrame` makes it, on: the MacBook's display;
+    /// the strip (1600 × 600, less a 25-point menu bar); Cristian's Bar, the 12.3FHD at 1600 × 600,
+    /// less a 24-point menu bar, and again with the Dock on it; a bar of 1920 × 480; and a sliver of
+    /// 1280 × 360. And 0.7.1's window, whose sheet hid Send.
+    private func windowContents() -> [(String, CGSize)] {
+        let titleBar = SupportCheckWindow.titleBarHeight(GestureTesterNSWindow.style)
+        let displays = [("the MacBook", CGRect(x: 0, y: 0, width: 1470, height: 923)),
+                        ("the strip", CGRect(x: 228, y: -600, width: 1600, height: 575)),
+                        ("the 12.3FHD Bar", CGRect(x: 1470, y: 0, width: 1600, height: 576)),
+                        ("the 12.3FHD Bar with the Dock", CGRect(x: 1470, y: 70, width: 1600, height: 506)),
+                        ("a bar", CGRect(x: 0, y: 1440, width: 1920, height: 455)),
+                        ("a sliver", CGRect(x: 0, y: -360, width: 1280, height: 335))]
+        var contents = displays.map { name, visible in
+            let frame = SupportCheckWindowFrame.frame(in: visible, titleBar: titleBar)
+            return (name, NSWindow.contentRect(forFrameRect: frame, styleMask: GestureTesterNSWindow.style).size)
+        }
+        contents.append(("0.7.1's window", CGSize(width: 780, height: 540 - titleBar)))
+        return contents
+    }
+
+    /// The sheet at each stage it can settle at: the form, with an address that doesn't look right
+    /// and a note of four lines; after the site said to try later, with the report saved and the
+    /// GitHub part; refused, with its reason, saved; too slow; sending stopped before the upload
+    /// (not sent) and during it (may have been sent); the site not taking reports, saved; a build
+    /// that only saves; sent; a save that failed; and a report that couldn't be made.
+    private func sheetStages() async throws -> [(String, Desk)] {
+        let note = String(repeating: "It sees one finger, then loses it near the left edge. ", count: 6)
+        func sheet(_ desk: Desk, email: String = "someone@example.com", sending: Bool = false,
+                   stopping: [String]? = nil) async throws -> Desk {
+            try await runThrough(desk)
+            desk.session.showSheet()
+            await settle(desk.session)
+            desk.session.form.email = email
+            desk.session.form.note = note
+            if sending {
+                desk.session.send()
+                if let stopping {
+                    await waitUntil { desk.transport.methods == stopping }
+                    desk.session.cancelSending()
+                }
+                await settle(desk.session)
+            }
+            return desk
+        }
+        func transport(_ change: (FakeTransport) -> Void) -> FakeTransport {
+            let transport = FakeTransport()
+            change(transport)
+            return transport
+        }
+        let refusal = #"{"error":"email","reason":"That address can’t receive mail. Check it, then send the report again."}"#
+        let notAFolder = try folder().appendingPathComponent("not-a-folder")
+        try Data().write(to: notAFolder)
+        let stages = [
+            ("the form", try await sheet(try desk(sending: .on(.builtIn)), email: "someone@example")),
+            ("try later, saved", try await sheet(try desk(sending: .on(.builtIn), transport: transport { $0.uploadStatus = 429 }),
+                                                 sending: true)),
+            ("refused, saved", try await sheet(try desk(sending: .on(.builtIn), transport: transport {
+                $0.uploadStatus = 422
+                $0.uploadBody = refusal
+            }), sending: true)),
+            ("too slow", try await sheet(try desk(sending: .on(.builtIn), transport: transport { $0.uploadStatus = 408 }),
+                                         sending: true)),
+            ("not sent", try await sheet(try desk(sending: .on(.builtIn), transport: transport { $0.holdsStatus = true }),
+                                         sending: true, stopping: ["GET"])),
+            ("may have been sent", try await sheet(try desk(sending: .on(.builtIn), transport: transport { $0.holdsUpload = true }),
+                                                   sending: true, stopping: ["GET", "POST"])),
+            ("unavailable, saved", try await sheet(try desk(sending: .on(.builtIn), transport: transport { $0.available = false }),
+                                                   sending: true)),
+            ("only saves", try await sheet(try desk(sending: .off))),
+            ("sent", try await sheet(try desk(sending: .on(.builtIn)), sending: true)),
+            ("save failed", try await sheet(try desk(sending: .off))),
+            ("no report", try await sheet(try desk(sending: .on(.builtIn), temporary: notAFolder))),
+        ]
+        for (name, desk) in stages where name.hasSuffix("saved") {
+            desk.session.save(to: desk.temporary.appendingPathComponent("report.zip"))
+        }
+        let failing = try XCTUnwrap(stages.first { $0.0 == "save failed" }).1
+        failing.session.save(to: failing.temporary.appendingPathComponent("no-such-folder/report.zip"))
+        XCTAssertEqual(stages.map { $0.1.session.sendStage },
+                       [.ready, .tryLater, .refused("That address can’t receive mail. Check it, then send the report again."),
+                        .tooSlow, .notSent, .mayHaveBeenSent, .unavailable, .off, .sent, .off, .ready])
+        XCTAssertTrue(failing.session.saveFailed)
+        XCTAssertNotNil(stages.last?.1.session.archiveFailure, "the report couldn't be made")
+        return stages
+    }
+
+    /// The sheet in the check's window on each display, at each stage: no larger than the window's
+    /// content, its title and its buttons (Save Report…, Cancel or Close or Done, Send) inside it, and
+    /// the file list at least four rows tall. Laid out in 0.7.1's window, it was 720 points tall in
+    /// 508 of content, and Send was cut off.
+    func testTheSheetShowsItsTitleAndButtonsInTheCheckWindow() async throws {
+        let stages = try await sheetStages()
+        let file = try XCTUnwrap(stages[0].1.session.archive?.files.first)
+        let row = NSHostingView(rootView: SupportFileRow(file: file, open: {}).frame(width: 520)).fittingSize.height
+        XCTAssertGreaterThanOrEqual(SupportSheetFit.fileListMinimum, 4 * row, "about four rows of \(row) at least")
+        for (display, room) in windowContents() {
+            for (stage, desk) in stages {
+                let name = "\(stage), on \(display) (\(Int(room.width)) × \(Int(room.height)))"
+                let laid = layOut(SupportSendSheet(session: desk.session, room: room), in: room)
+                try assertFits(laid, in: room, name)
+                XCTAssertEqual(laid.size, SupportSheetFit.sheet(in: room), name)
+                guard desk.session.archive != nil else { continue }
+                let files = try XCTUnwrap(laid.parts[.files], "\(name): its file list")
+                XCTAssertGreaterThanOrEqual(files.height, 4 * row, "\(name): four rows of the file list at least")
+            }
+        }
+    }
+
+    /// Where there is room, on an ordinary display, the sheet shows the whole file list.
+    func testOnAnOrdinaryDisplayTheSheetShowsEveryFile() async throws {
+        let stages = try await sheetStages()
+        let room = try XCTUnwrap(windowContents().first { $0.0 == "the MacBook" }).1
+        XCTAssertEqual(room.height, SupportCheckWindowFrame.content.height)
+        for (stage, desk) in stages where ["the form", "only saves", "sent"].contains(stage) {
+            let laid = layOut(SupportSendSheet(session: desk.session, room: room), in: room)
+            let files = try XCTUnwrap(laid.parts[.files], stage)
+            XCTAssertEqual(files.height, SupportSheetFit.fileListHeight, accuracy: 0.5, "\(stage): every file")
+        }
+    }
+
+    /// The file viewer, a sheet on the sheet, at the sheet's size on each display: no larger than the
+    /// sheet, its file's name at the top and Close at the bottom inside it.
+    func testTheFileViewerShowsItsCloseButtonInTheSheet() async throws {
+        let desk = try desk(sending: .on(.builtIn))
+        try await runThrough(desk)
+        desk.session.showSheet()
+        await settle(desk.session)
+        let file = try XCTUnwrap(desk.session.archive?.files.first { $0.name == "touches.json" })
+        for (display, room) in windowContents() {
+            let sheet = SupportSheetFit.sheet(in: room)
+            let laid = layOut(SupportFileViewer(file: file, room: sheet), in: sheet)
+            try assertFits(laid, in: sheet, "the file viewer on \(display)")
+        }
+    }
+
+    /// After Send or Save Report…, what it came to is in view on each display, at each stage: the
+    /// stage's message (sent, refused, try later, too slow, unavailable, not sent, may have been
+    /// sent), the saved or not-saved line, and the GitHub part. Not scrolled out of the sheet's
+    /// middle, and not under its buttons. In the first build of this fix they sat at the end of the
+    /// scrolling middle, and after "try later" they were out of view on every short display.
+    func testAfterSendTheOutcomeIsInView() async throws {
+        let stages = try await sheetStages()
+        for (display, room) in windowContents() {
+            for (stage, desk) in stages {
+                let session = desk.session
+                let content = SupportSendSheetContent(stage: session.sendStage, form: session.form, saved: session.savedAs != nil)
+                var parts: [SupportPart] = []
+                if content.message != nil { parts.append(.message) }
+                if session.savedAs != nil || session.saveFailed { parts.append(.saved) }
+                if content.showsGitHub { parts.append(.gitHub) }
+                let name = "\(stage), on \(display) (\(Int(room.width)) × \(Int(room.height)))"
+                let laid = layOut(SupportSendSheet(session: session, room: room), in: room)
+                for part in parts {
+                    XCTAssertTrue(isInView(part, laid), "\(name): \(part) at \(String(describing: laid.parts[part])), the middle showing \(String(describing: laid.parts[.middle]))")
+                }
+            }
+        }
+    }
+
+    /// While the report is being made, and while it is sent (Stop Sending in place of Cancel), the
+    /// sheet's title and buttons are inside it on each display.
+    func testTheSheetFitsWhileTheReportIsMadeAndWhileItSends() async throws {
+        let making = try desk(sending: .on(.builtIn))
+        try await runThrough(making)
+        making.session.showSheet()
+        XCTAssertNil(making.session.archive, "still being made")
+        for (display, room) in windowContents() {
+            try assertFits(layOut(SupportSendSheet(session: making.session, room: room), in: room), in: room,
+                           "making the report, on \(display)")
+        }
+        await settle(making.session)
+
+        let held = FakeTransport()
+        held.holdsUpload = true
+        let sending = try desk(sending: .on(.builtIn), transport: held)
+        try await runThrough(sending)
+        sending.session.showSheet()
+        await settle(sending.session)
+        sending.session.form.email = "someone@example.com"
+        sending.session.send()
+        await waitUntil { held.methods == ["GET", "POST"] }
+        XCTAssertEqual(sending.session.sendStage, .sending)
+        for (display, room) in windowContents() {
+            let laid = layOut(SupportSendSheet(session: sending.session, room: room), in: room)
+            try assertFits(laid, in: room, "sending, on \(display)")
+            XCTAssertTrue(isInView(.message, laid), "sending, on \(display): Sending… in view")
+        }
+        sending.session.cancelSending()
+        await settle(sending.session)
+    }
+
+    /// The window itself, on each display: its header at the top and the step's buttons (Start Check;
+    /// Skip; Done and Send to Tactile's Developer…; Done) at the bottom, inside its content.
+    func testTheWindowShowsItsHeaderAndButtonsOnEachDisplay() async throws {
+        let desk = try desk(sending: .on(.builtIn))
+        let session = desk.session
+        func check(_ session: SupportCheckSession, _ stage: String) throws {
+            for (display, room) in windowContents() {
+                try assertFits(layOut(SupportCheckView(session: session), in: room), in: room, "\(stage), on \(display)")
+            }
+        }
+        try check(session, "ready")
+        let refusing = FakeModel()
+        refusing.snapshot.setUpMode = SetUpModeSnapshot(stage: .choosing, displays: [], touchscreens: [], justSetUp: nil, notice: nil)
+        try check(try self.desk(sending: .off, model: refusing).session, "ready, waiting for a set-up")
+        await start(session)
+        clock += 4
+        session.tick()
+        try check(session, "touching")
+        for _ in 0..<3 { session.skip() }
+        try check(session, "the verdict")
+        let interrupted = try self.desk(sending: .off)
+        await start(interrupted.session)
+        interrupted.session.stop()
+        try check(interrupted.session, "interrupted")
+    }
+
+    /// The window gives the sheet the size of its own content, whatever size the window took: the
+    /// room the sheet it presents is fitted to (`SupportSheetRoom`) is the size the window's content
+    /// was laid out at, on each display.
+    func testTheWindowGivesTheSheetItsOwnContent() async throws {
+        let desk = try desk(sending: .on(.builtIn))
+        try await runThrough(desk)
+        _ = NSApplication.shared
+        for (display, room) in windowContents() {
+            XCTAssertEqual(sheetRoom(SupportCheckView(session: desk.session), in: room), room, display)
+        }
+    }
+
+    /// The room `view` gives the sheet it presents, laid out at `size` by an `NSHostingView` never put
+    /// in a window.
+    private func sheetRoom<V: View>(_ view: V, in size: CGSize) -> CGSize? {
+        let box = RoomBox()
+        let host = NSHostingView(rootView: view.onPreferenceChange(SupportSheetRoom.self) { box.room = $0 })
+        host.frame = CGRect(origin: .zero, size: size)
+        for _ in 0..<4 {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        return box.room
+    }
+
+    private final class RoomBox {
+        var room: CGSize?
+    }
+
+    /// A view laid out as a sheet in `room`: its size, and where its parts are within it.
+    private struct Laid: Equatable {
+        var size: CGSize
+        var parts: [SupportPart: CGRect]
+    }
+
+    /// What the layout reports, kept as it goes.
+    private final class LaidBox {
+        var laid = Laid(size: .zero, parts: [:])
+    }
+
+    /// Lays `view` out by an `NSHostingView` of `room`'s size, never put in a window, and reads its
+    /// size and its parts' bounds from its preference.
+    private func layOut<V: View>(_ view: V, in room: CGSize) -> Laid {
+        _ = NSApplication.shared
+        let box = LaidBox()
+        let host = NSHostingView(rootView: view.overlayPreferenceValue(SupportParts.self) { anchors in
+            GeometryReader { proxy in
+                let _ = box.laid = Laid(size: proxy.size, parts: anchors.mapValues { proxy[$0] })
+                Color.clear
+            }
+        })
+        host.frame = CGRect(origin: .zero, size: room)
+        // A scroll view lays its content out on a later turn of the run loop: at least three turns,
+        // then on until two in a row agree.
+        var last: Laid?
+        for pass in 1...8 {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            if pass >= 3, let last, last == box.laid { break }
+            last = box.laid
+        }
+        return box.laid
+    }
+
+    /// Whether `part` shows: inside the view, clear of its buttons, and, where it is in the sheet's
+    /// scrolling middle (or a scrolling outcome), inside what that shows.
+    private func isInView(_ part: SupportPart, _ laid: Laid) -> Bool {
+        guard let bounds = laid.parts[part], CGRect(origin: .zero, size: laid.size).contains(bounds) else { return false }
+        if let buttons = laid.parts[.buttons], bounds.intersects(buttons) { return false }
+        if [.message, .saved, .gitHub].contains(part), let outcome = laid.parts[.outcome] { return outcome.contains(bounds) }
+        if let scrolled = laid.parts[.scrolled], scrolled.contains(bounds), laid.parts[.middle]?.contains(bounds) != true { return false }
+        return true
+    }
+
+    /// No larger than `room`; its title at the top and its buttons at the bottom both inside it.
+    private func assertFits(_ laid: Laid, in room: CGSize, _ name: String,
+                            file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertLessThanOrEqual(laid.size.width, room.width, "\(name): as wide as \(room.width) at most", file: file, line: line)
+        XCTAssertLessThanOrEqual(laid.size.height, room.height, "\(name): as tall as \(room.height) at most", file: file, line: line)
+        let bounds = CGRect(origin: .zero, size: laid.size)
+        let title = try XCTUnwrap(laid.parts[.title], "\(name): its title", file: file, line: line)
+        let buttons = try XCTUnwrap(laid.parts[.buttons], "\(name): its buttons", file: file, line: line)
+        XCTAssertTrue(bounds.contains(title), "\(name): its title \(title) inside \(bounds)", file: file, line: line)
+        XCTAssertTrue(bounds.contains(buttons), "\(name): its buttons \(buttons) inside \(bounds)", file: file, line: line)
+        XCTAssertLessThan(title.maxY, buttons.minY, "\(name): the title above the buttons", file: file, line: line)
+    }
+
     // MARK: - Pictures, for a person to look at
 
     /// Renders the window at each stage, and the sheet, to PNG files. Skipped unless `TACTILE_RENDER_UI`
@@ -763,23 +1075,25 @@ final class SupportCheckSessionTests: XCTestCase {
         _ = NSApplication.shared
         NSApplication.shared.setActivationPolicy(.prohibited)
 
+        let window = SupportCheckWindowFrame.content
         let desk = try desk(sending: .on(.builtIn))
         let session = desk.session
-        try render(SupportCheckView(session: session), size: SupportCheckWindow.size, to: out, name: "support-1-ready")
+        try render(SupportCheckView(session: session), size: window, to: out, name: "support-1-ready")
         await start(session)
         clock += 4
         session.tick()
         desk.system.send([0x04] + [UInt8](repeating: 0, count: 62), on: Self.touchID, at: clock)
-        try render(SupportCheckView(session: session), size: SupportCheckWindow.size, to: out, name: "support-2-touching")
+        try render(SupportCheckView(session: session), size: window, to: out, name: "support-2-touching")
         let take = try XCTUnwrap(SurveyFixtures.surveyB.touchscreen(vendorID: 0x222a, productID: 0x0001)?.takes.first { $0.number == 3 })
         let first = take.reports.first?.hostTime ?? 0
         for report in take.reports { desk.system.send(report.bytes, on: Self.touchID, at: clock + 0.1 + report.hostTime - first) }
         for _ in 0..<3 { session.skip() }
-        try render(SupportCheckView(session: session), size: SupportCheckWindow.size, to: out, name: "support-3-verdict")
+        try render(SupportCheckView(session: session), size: window, to: out, name: "support-3-verdict")
         session.showSheet()
         await settle(session)
         session.form.email = "someone@example"
-        try render(SupportSendSheet(session: session), size: SupportSendSheet.size, to: out, name: "support-4-sheet")
+        let sheet = SupportSheetFit.sheet(in: window)
+        try render(SupportSendSheet(session: session, room: window), size: sheet, to: out, name: "support-4-sheet")
 
         let unavailable = FakeTransport()
         unavailable.available = false
@@ -791,8 +1105,9 @@ final class SupportCheckSessionTests: XCTestCase {
         offline.session.send()
         await settle(offline.session)
         offline.session.save(to: offline.temporary.appendingPathComponent("r2.zip"))
-        try render(SupportSendSheet(session: offline.session), size: SupportSendSheet.size, to: out, name: "support-5-unavailable")
-        try render(SupportFileViewer(file: try XCTUnwrap(session.archive?.files.first)), size: CGSize(width: 640, height: 520),
+        try render(SupportSendSheet(session: offline.session, room: window), size: sheet, to: out, name: "support-5-unavailable")
+        let viewer = SupportSheetFit.viewer(on: sheet)
+        try render(SupportFileViewer(file: try XCTUnwrap(session.archive?.files.first), room: sheet), size: viewer,
                    to: out, name: "support-6-viewer")
         try render(Form { NotListedSection(snapshot: PreviewModel(.desk).snapshot, perform: { _ in }, list: nil) }.formStyle(.grouped),
                    size: CGSize(width: 560, height: 220), to: out, name: "support-7-not-listed")
@@ -800,11 +1115,30 @@ final class SupportCheckSessionTests: XCTestCase {
         let refusing = FakeModel()
         refusing.snapshot.setUpMode = SetUpModeSnapshot(stage: .choosing, displays: [], touchscreens: [], justSetUp: nil, notice: nil)
         let waiting = try self.desk(sending: .off, model: refusing)
-        try render(SupportCheckView(session: waiting.session), size: SupportCheckWindow.size, to: out, name: "support-8-start-waits")
+        try render(SupportCheckView(session: waiting.session), size: window, to: out, name: "support-8-start-waits")
         let interrupted = try self.desk(sending: .off)
         await start(interrupted.session)
         interrupted.session.stop()
-        try render(SupportCheckView(session: interrupted.session), size: SupportCheckWindow.size, to: out, name: "support-9-interrupted")
+        try render(SupportCheckView(session: interrupted.session), size: window, to: out, name: "support-9-interrupted")
+
+        // The window with its sheet up, on each display: the sheet drawn over the window's content,
+        // in the middle, as macOS 26 draws it (earlier macOS hangs it from the title bar).
+        // And the window alone at the ready stage, with Start Check, on each display.
+        let stages = try await sheetStages()
+        let ready = try self.desk(sending: .on(.builtIn))
+        func slug(_ text: String) -> String {
+            text.lowercased().split { !($0.isLetter || $0.isNumber) }.joined(separator: "-")
+        }
+        for (display, room) in windowContents() {
+            for (stage, desk) in stages where ["the form", "try later, saved", "refused, saved", "sent"].contains(stage) {
+                try render(SheetOverWindow(session: desk.session, room: room), size: room, to: out,
+                           name: "support-10-\(slug(display))-\(slug(stage))")
+            }
+            if let file = stages[0].1.session.archive?.files.first(where: { $0.name == "touches.json" }) {
+                try render(ViewerOverSheet(file: file, room: room), size: room, to: out, name: "support-11-\(slug(display))-viewer")
+            }
+            try render(SupportCheckView(session: ready.session), size: room, to: out, name: "support-12-\(slug(display))-ready")
+        }
     }
 
     private func render<V: View>(_ view: V, size: CGSize, to folder: URL, name: String) throws {
@@ -821,5 +1155,45 @@ final class SupportCheckSessionTests: XCTestCase {
             let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
             try png.write(to: folder.appendingPathComponent("\(name)-\(dark ? "dark" : "light").png"))
         }
+    }
+}
+
+/// The check's window with its sheet up, for the pictures: the window's content, dimmed, and the
+/// sheet over it in the middle, with a sheet's edge and shadow.
+private struct SheetOverWindow: View {
+    let session: SupportCheckSession
+    let room: CGSize
+
+    var body: some View {
+        ZStack {
+            SupportCheckView(session: session)
+            Color.black.opacity(0.15)
+            SupportSendSheet(session: session, room: room)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(nsColor: .separatorColor)))
+                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+        }
+        .frame(width: room.width, height: room.height)
+    }
+}
+
+/// The file viewer over the sheet over the window, for the pictures.
+private struct ViewerOverSheet: View {
+    let file: SupportFile
+    let room: CGSize
+
+    var body: some View {
+        let sheet = SupportSheetFit.sheet(in: room)
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .underPageBackgroundColor))
+                .frame(width: sheet.width, height: sheet.height)
+            SupportFileViewer(file: file, room: sheet)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(nsColor: .separatorColor)))
+                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+        }
+        .frame(width: room.width, height: room.height)
     }
 }
