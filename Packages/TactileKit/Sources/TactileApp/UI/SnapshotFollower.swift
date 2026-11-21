@@ -79,7 +79,12 @@ final class SnapshotFollower {
         let follower = SnapshotFollower(
             model: model,
             showSetUp: { [weak model] presentation in
-                SetUpOverlay.shared.show(presentation, perform: { model?.perform($0) })
+                SetUpOverlay.shared.show(
+                    presentation, perform: { model?.perform($0) },
+                    check: { id in
+                        guard let model else { return }
+                        SetUpModeCheck.leaveThenCheck(id, model: model)
+                    })
             },
             showFirstRun: { [weak model] offer in
                 FirstRunWindow.shared.show(offer, perform: { model?.perform($0) })

@@ -304,13 +304,16 @@ struct SetUpControls: View {
     var screen: SetUpScreen
     var displaySize: CGSize
     var perform: PerformCommand
+    /// The session card's Check This Touchscreen… and Check… (`SetUpModeCheck`).
+    var check: CheckTouchscreen = { _ in }
 
     var body: some View {
         let scale = SetUpMetrics(displaySize: displaySize).cardScale
         Group {
             switch screen.role {
             case .overview(let overview):
-                SetUpModeControls(overview: overview, mouseHint: screen.mouseHint, scale: scale, perform: perform)
+                SetUpModeControls(overview: overview, mouseHint: screen.mouseHint, scale: scale, perform: perform,
+                                  check: check)
             case .size(let choices):
                 SetUpSizeCard(choices: choices, inSetUpMode: screen.inSetUpMode, scale: scale, perform: perform)
             case .check(let canRedo):

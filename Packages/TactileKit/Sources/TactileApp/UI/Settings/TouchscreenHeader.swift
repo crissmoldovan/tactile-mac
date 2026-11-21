@@ -1,10 +1,13 @@
 import SwiftUI
 
 /// The head of a touchscreen's pane: its tile, its name (renamed in place), its device's own name
-/// when it has another, the status line, the notes, and its On switch. For a connected touchscreen
-/// that isn't set up, Set Up by Touch… beneath, as the one thing to do: it begins set-up mode.
+/// when it has another, the status line (unless it says what the Display row says), the notes, and
+/// its On switch, with Check This Touchscreen… under it for a connected touchscreen
+/// (`TouchscreenHeaderContent`). For a connected touchscreen that isn't set up, Set Up by Touch…
+/// beneath, as the one thing to do: it begins set-up mode.
 struct TouchscreenHeader: View {
     var touchscreen: TouchscreenSnapshot
+    var content: TouchscreenHeaderContent
     /// Whether Set Up by Touch… is shown here, and whether it can be used; nil: not shown.
     var setUp: SetUpAvailability? = nil
     var perform: PerformCommand
@@ -14,7 +17,9 @@ struct TouchscreenHeader: View {
             TouchscreenTile(isActive: StatusIndicator(touchscreen) != .inactive)
             VStack(alignment: .leading, spacing: 4) {
                 TouchscreenName(touchscreen: touchscreen, perform: perform)
-                StatusLine(touchscreen: touchscreen)
+                if content.showsStatusLine {
+                    StatusLine(touchscreen: touchscreen)
+                }
                 ForEach(touchscreen.headerNotes, id: \.self) { note in
                     NoteLine(note: note)
                 }
@@ -32,13 +37,22 @@ struct TouchscreenHeader: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Toggle(Wording.on, isOn: Binding(
-                get: { touchscreen.isOn },
-                set: { perform(.setTouchscreenOn(touchscreen.id, $0)) }))
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .disabled(!touchscreen.onSwitchIsEnabled)
-                .accessibilityLabel("\(touchscreen.name) on")
+            VStack(alignment: .trailing, spacing: 10) {
+                Toggle(Wording.on, isOn: Binding(
+                    get: { touchscreen.isOn },
+                    set: { perform(.setTouchscreenOn(touchscreen.id, $0)) }))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .disabled(!touchscreen.onSwitchIsEnabled)
+                    .accessibilityLabel("\(touchscreen.name) on")
+                if let check = content.check {
+                    Button(Wording.checkThisTouchscreen) {
+                        SupportCheckWindow.open(SupportTarget(touchscreen), perform: perform)
+                    }
+                    .disabled(check != .available)
+                    .help(check == .available ? "" : Wording.supportUnavailable(check))
+                }
+            }
         }
         .padding(.vertical, 4)
     }

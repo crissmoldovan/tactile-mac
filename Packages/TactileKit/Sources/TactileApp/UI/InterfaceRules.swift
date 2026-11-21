@@ -1,7 +1,7 @@
 // The interface's small decisions, kept pure so they are tested without drawing anything: when
-// Settings opens itself, what the sidebar selects, the status dots, what the menu lists and what a
-// touchscreen's details beside it offer, when those open and close as the pointer goes, what the
-// Diagonal field accepts and what committing it sends.
+// Settings opens itself, what the sidebar lists and selects, the status dots, what a touchscreen's
+// header shows, what the menu lists and what a touchscreen's details beside it offer, when those open
+// and close as the pointer goes, what the Diagonal field accepts and what committing it sends.
 
 import CoreGraphics
 import Foundation
@@ -23,10 +23,19 @@ public func shouldOpenSettingsAtLaunch(_ snapshot: AppSnapshot) -> Bool {
 enum SidebarItem: Hashable, Sendable {
     case touchscreen(TouchscreenID)
     case general
+    /// Touchscreen Check: every touchscreen and touch device there is to check (`TouchscreenCheckPane`).
+    case touchscreenCheck
+
+    /// Below the touchscreens, in order: General, then Touchscreen Check.
+    static let belowTouchscreens: [SidebarItem] = [.general, .touchscreenCheck]
+
+    /// Touchscreen Check's symbol in the sidebar and at the head of its pane (SF Symbols 1, so on
+    /// every macOS Tactile runs on).
+    static let touchscreenCheckSymbol = "stethoscope"
 
     /// The selection when Settings opens: General when Accessibility access is missing (its button
     /// is there); else the first connected touchscreen that isn't set up; else the first
-    /// touchscreen; else General.
+    /// touchscreen; else General. Never Touchscreen Check, which waits for the person to choose it.
     static func initial(for snapshot: AppSnapshot) -> SidebarItem {
         if snapshot.warnings.contains(.accessibilityMissing) {
             return .general
@@ -64,7 +73,7 @@ enum SidebarItem: Hashable, Sendable {
 
     private func exists(in snapshot: AppSnapshot) -> Bool {
         switch self {
-        case .general: return true
+        case .general, .touchscreenCheck: return true
         case .touchscreen(let id): return snapshot.touchscreens.contains { $0.id == id }
         }
     }
@@ -109,6 +118,28 @@ enum StatusIndicator: Equatable, Sendable {
         case .notConnected, .off, .tactileOff, .accessibilityMissing: self = .inactive
         case .stoppedAnswering: self = .problem
         }
+    }
+}
+
+// MARK: - A touchscreen's header
+
+/// What the head of a touchscreen's pane shows beside its name: its status line, unless it says
+/// "Paired with …", which the Display row just beneath says too; and, under its On switch, Check This
+/// Touchscreen… for a connected touchscreen.
+struct TouchscreenHeaderContent: Equatable {
+    var showsStatusLine: Bool
+    /// Check This Touchscreen…: whether it can be used now; nil when it isn't shown (not connected).
+    var check: SupportCheckAvailability?
+
+    /// `finishing`: an earlier check of it is still letting go.
+    init(_ touchscreen: TouchscreenSnapshot, in snapshot: AppSnapshot, finishing: Bool = false) {
+        if case .pairedWith = touchscreen.status, touchscreen.mode != .settingUp {
+            showsStatusLine = false
+        } else {
+            showsStatusLine = true
+        }
+        check = touchscreen.isConnected
+            ? SupportCheckAvailability.of(touchscreen, in: snapshot, finishing: finishing) : nil
     }
 }
 
@@ -290,8 +321,8 @@ struct MenuTouchscreenDetails: Equatable {
     var controls: Controls?
     /// Why a connected touchscreen can't be used.
     var unusable: Unusable?
-    /// Help Me Support This Touchscreen…, for every connected touchscreen, usable or not; nil for
-    /// one that isn't connected.
+    /// Check This Touchscreen…, for every connected touchscreen, usable or not; nil for one that
+    /// isn't connected.
     var support: SupportCheckAvailability?
     /// What the check needs to find it, with `support`.
     var supportTarget: SupportTarget?

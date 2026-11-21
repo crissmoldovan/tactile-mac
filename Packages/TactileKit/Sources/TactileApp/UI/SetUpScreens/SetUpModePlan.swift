@@ -11,7 +11,10 @@
 //   button; Test goes, and the session card offers Back.
 // - The session card: on the built-in display (never a candidate), else beside the first
 //   candidate's card. One line per touchscreen, the latest notice, "Esc leaves at any time", Finish.
-//   Should the chosen display carry it, its "Now touch this screen" goes in a card beside it.
+//   Should the chosen display carry it, its "Now touch this screen" goes in a card beside it. For
+//   touch that isn't working right, a way to the touchscreen check, with the mouse: Check This
+//   Touchscreen… with one touchscreen, Check… on each line with several. It leaves set-up mode first
+//   (`SetUpModeCheck`).
 
 import Foundation
 import TactileScreens
@@ -126,12 +129,68 @@ struct SetUpModeCard: Equatable, Sendable {
     }
 }
 
-/// The session card: every connected touchscreen, the latest notice, and Finish.
+/// The session card: every connected touchscreen, the latest notice, the way to the touchscreen
+/// check, and Finish.
 struct SetUpModeSession: Equatable, Sendable {
+    /// How the card offers the touchscreen check.
+    enum CheckOffer: Equatable, Sendable {
+        /// One touchscreen in the session: "Touch not working right?" and Check This Touchscreen….
+        case one(TouchscreenID)
+        /// Several: Check… on each touchscreen's line.
+        case eachLine
+    }
+
     var lines: [SetUpTouchscreenLine]
     var notice: SetUpModeNotice?
     /// Once a touchscreen was touched before a display was chosen: its name, with Back beside it.
     var touchedFirst: String?
+    /// Whether each line's touchscreen can be checked once set-up mode has let go of it
+    /// (`SupportCheckAvailability.leavingSetUp`); an earlier check still letting go is the view's
+    /// to add, as it changes without the snapshot.
+    var checks: [TouchscreenID: SupportCheckAvailability] = [:]
+
+    var checkOffer: CheckOffer? {
+        guard let first = lines.first else { return nil }
+        return lines.count == 1 ? .one(first.id) : .eachLine
+    }
+}
+
+/// What Check This Touchscreen… and Check… on the session card do, with the touchscreen's ID: leave
+/// set-up mode, then open the check (`SetUpModeCheck`). Renders and previews do less.
+typealias CheckTouchscreen = @MainActor (TouchscreenID) -> Void
+
+/// Check This Touchscreen… and Check… on the session card. Set-up mode is left exactly as Finish
+/// leaves it (`cancelSetUp`), keeping whatever was set up in it. Then, once the model's snapshot says
+/// set-up has let go (no set-up mode, no set-up, and the touchscreen no longer being set up), the
+/// check opens for that touchscreen, found again in that snapshot. If set-up still has it (the model
+/// didn't leave), or it has gone, no check opens.
+enum SetUpModeCheck {
+    @MainActor
+    static func leaveThenCheck(
+        _ id: TouchscreenID, perform: PerformCommand, snapshot: () -> AppSnapshot?, open: (SupportTarget) -> Void
+    ) {
+        perform(.cancelSetUp)
+        guard let after = snapshot(), after.setUp == nil, after.setUpMode == nil else {
+            InterfaceLog.log.info("set-up: the check wasn't opened; set-up mode is still on")
+            return
+        }
+        guard let touchscreen = after.touchscreens.first(where: { $0.id == id }), touchscreen.isConnected,
+            touchscreen.mode != .settingUp
+        else {
+            InterfaceLog.log.info("set-up: the check wasn't opened; the touchscreen isn't there now")
+            return
+        }
+        open(SupportTarget(touchscreen))
+    }
+
+    /// The app's: the check's window opens on the main actor's next turn, once the set-up screens,
+    /// which follow the same snapshot, have come down.
+    @MainActor
+    static func leaveThenCheck(_ id: TouchscreenID, model: any AppModel) {
+        leaveThenCheck(id, perform: { model.perform($0) }, snapshot: { model.snapshot }, open: { target in
+            Task { @MainActor in SupportCheckWindow.open(target, perform: { model.perform($0) }) }
+        })
+    }
 }
 
 /// What one display shows in the overview: its card, if it is a candidate; the session card, if it
@@ -191,7 +250,14 @@ extension SetUpScreens {
         }
         let lines = Dictionary(mode.touchscreens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let sessionDisplay = Self.sessionDisplay(mode, in: snapshot)
-        let session = SetUpModeSession(lines: mode.touchscreens, notice: mode.notice, touchedFirst: touchedFirst)
+        // Whether each line's touchscreen can be checked, once the card's Check has left the mode.
+        var checks: [TouchscreenID: SupportCheckAvailability] = [:]
+        for line in mode.touchscreens {
+            let touchscreen = snapshot.touchscreens.first { $0.id == line.id }
+            checks[line.id] = touchscreen.map { SupportCheckAvailability.leavingSetUp($0) } ?? .notConnected
+        }
+        let session = SetUpModeSession(
+            lines: mode.touchscreens, notice: mode.notice, touchedFirst: touchedFirst, checks: checks)
 
         return snapshot.displays.map { display in
             let card = cards.first { $0.id == display.id }.map { card -> SetUpModeCard in

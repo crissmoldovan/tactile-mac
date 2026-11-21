@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 import TactileScreens
 
-/// A touchscreen's pane. Connected: its display, orientation, alignment and diagonal; its behaviour,
-/// gestures and accidental touches; what it does when off; Copy Settings From… and Reset.
+/// A touchscreen's pane: its head (`TouchscreenHeader`), with Check This Touchscreen… while it is
+/// connected. Connected: its display, orientation, alignment and diagonal; its behaviour, gestures
+/// and accidental touches; what it does when off; Copy Settings From… and Reset.
 /// Remembered and not connected: the same head, its pairing read-only, and Forget. While a set-up
 /// runs, the controls that change a fit are disabled, and one line says why (`FitControls`).
 struct TouchscreenPane: View {
@@ -26,7 +27,11 @@ struct TouchscreenPane: View {
         let fit = FitControls(touchscreen, in: snapshot)
         Form {
             Section {
-                TouchscreenHeader(touchscreen: touchscreen, setUp: setUpInHeader ? setUp : nil, perform: send)
+                TouchscreenHeader(
+                    touchscreen: touchscreen,
+                    content: TouchscreenHeaderContent(
+                        touchscreen, in: snapshot, finishing: SupportChecksFinishing.shared.isFinishing(touchscreen.id)),
+                    setUp: setUpInHeader ? setUp : nil, perform: send)
             }
             if touchscreen.isConnected {
                 Section {
@@ -49,7 +54,6 @@ struct TouchscreenPane: View {
                 BehaviourSection(touchscreen: touchscreen, perform: perform)
                 GesturesSection(touchscreen: touchscreen, warnings: snapshot.warnings, perform: perform)
                 GestureTesterSection(touchscreen: touchscreen, snapshot: snapshot, perform: perform)
-                SupportSection(touchscreen: touchscreen, snapshot: snapshot, perform: perform)
                 AccidentalTouchesSection(touchscreen: touchscreen, perform: perform)
                 WhenOffSection(touchscreen: touchscreen, perform: perform)
                 Section {
