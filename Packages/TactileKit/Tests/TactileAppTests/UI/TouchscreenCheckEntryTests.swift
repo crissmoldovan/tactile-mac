@@ -567,17 +567,19 @@ final class TouchscreenCheckEntryTests: XCTestCase {
         }
     }
 
-    /// Nothing the interface shows, and no document in the repository, still names the old entries.
+    /// Nothing the interface shows or logs, no comment in its code, and no document in the
+    /// repository still names the old entries.
     func testNothingSaysHelpMeSupportAnyMore() throws {
         let root = try Self.repositoryRoot()
         let files = FileManager.default
         var texts: [URL] = []
         let sources = root.appendingPathComponent("Packages/TactileKit/Sources/TactileApp")
         let enumerator = try XCTUnwrap(files.enumerator(at: sources, includingPropertiesForKeys: nil))
-        for case let url as URL in enumerator where url.lastPathComponent.hasPrefix("Wording") && url.pathExtension == "swift" {
+        for case let url as URL in enumerator where url.pathExtension == "swift" {
             texts.append(url)
         }
-        XCTAssertGreaterThanOrEqual(texts.count, 4, "the wording files")
+        XCTAssertTrue(texts.contains { $0.lastPathComponent == "Wording+Support.swift" }, "the wording files")
+        XCTAssertTrue(texts.contains { $0.lastPathComponent == "SupportCheckWindow.swift" }, "the check's window")
         for folder in ["", "docs", ".github", ".github/ISSUE_TEMPLATE"] {
             let url = folder.isEmpty ? root : root.appendingPathComponent(folder)
             for name in (try? files.contentsOfDirectory(atPath: url.path)) ?? []

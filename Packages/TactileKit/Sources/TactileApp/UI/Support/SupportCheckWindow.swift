@@ -41,9 +41,11 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
         shared.model = model
     }
 
-    /// Help Me Support This Touchscreen…, for a touchscreen Tactile lists.
+    /// Check This Touchscreen… (a touchscreen's header, its details beside the menu, the set-up
+    /// screens' cards) and Check… (Touchscreen Check, set-up mode's session card), for a touchscreen
+    /// Tactile lists.
     static func open(_ touchscreen: SupportTarget, perform: @escaping PerformCommand) {
-        InterfaceLog.log.info("touchscreen check: Help Me Support This Touchscreen… pressed for \(touchscreen.usbID, privacy: .public)")
+        InterfaceLog.log.info("touchscreen check: Check This Touchscreen… or Check… pressed for \(touchscreen.usbID, privacy: .public)")
         let model = shared.model
         shared.open(SupportCheckSession(deviceID: nil, touchscreen: touchscreen, name: touchscreen.name,
                                         perform: model.map { model in { model.perform($0) } } ?? perform,
@@ -51,7 +53,7 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
                     display: touchscreen.pairedDisplayID)
     }
 
-    /// Check… in Touchscreen Not Listed?, for a device Tactile doesn't list.
+    /// Check… in Touchscreen Check, for a device Tactile doesn't list.
     static func open(_ device: SupportDevice, perform: @escaping PerformCommand) {
         InterfaceLog.log.info("touchscreen check: Check… pressed for \(device.usbID, privacy: .public)")
         shared.open(SupportCheckSession(deviceID: device.id, touchscreen: nil, name: Wording.supportDeviceName(device),
