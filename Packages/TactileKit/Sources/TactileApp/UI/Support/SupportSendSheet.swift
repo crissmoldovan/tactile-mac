@@ -4,8 +4,9 @@
 // GitHub issues are public and the button that opens a touchscreen report there.
 //
 // It is no larger than the check window's content (`SupportSheetFit`), whatever the window's size:
-// its title stays at the top and its buttons at the bottom, and what lies between scrolls when it
-// doesn't fit, the file list giving up height first.
+// its title stays at the top, and its buttons at the bottom with what Send or Save Report… came to
+// just above them. The intro, the file list and the form scroll between when they don't fit, the
+// file list giving up height first.
 
 import AppKit
 import SwiftUI
@@ -45,25 +46,16 @@ struct SupportSendSheet: View {
                         if content.showsForm {
                             form(enabled: content.formIsEnabled)
                         }
-                        if let message = content.message {
-                            Text(message)
-                                .foregroundStyle(session.sendStage == .sent ? .primary : .secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        if let saved = session.savedAs {
-                            Label(Wording.reportSaved(saved), systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        } else if session.saveFailed {
-                            Label(Wording.saveFailed, systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                        }
-                        if content.showsGitHub {
-                            gitHub
-                        }
                     }
+                    .supportPart(.scrolled)
                     .padding(.horizontal, Self.ringRoom)
                 }
                 .padding(.horizontal, -Self.ringRoom)
+            }
+            .supportPart(.middle)
+            if content.message != nil || session.savedAs != nil || session.saveFailed || content.showsGitHub {
+                outcome(content)
+                    .layoutPriority(1)
             }
             buttons(content)
                 .supportPart(.buttons)
@@ -133,6 +125,44 @@ struct SupportSendSheet: View {
         }
         .textFieldStyle(.roundedBorder)
         .disabled(!enabled)
+    }
+
+    /// What sending came to, the saved (or not saved) line and the GitHub part, in that order, just
+    /// above the buttons and outside what scrolls, so that the result of Send or Save Report… is
+    /// always in view. On a display too short even for them, they scroll on their own, from the top.
+    private func outcome(_ content: SupportSendSheetContent) -> some View {
+        ViewThatFits(in: .vertical) {
+            outcomeParts(content)
+            ScrollView(.vertical) {
+                outcomeParts(content)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .supportPart(.outcome)
+    }
+
+    private func outcomeParts(_ content: SupportSendSheetContent) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let message = content.message {
+                Text(message)
+                    .foregroundStyle(session.sendStage == .sent ? .primary : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .supportPart(.message)
+            }
+            if let saved = session.savedAs {
+                Label(Wording.reportSaved(saved), systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .supportPart(.saved)
+            } else if session.saveFailed {
+                Label(Wording.saveFailed, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .supportPart(.saved)
+            }
+            if content.showsGitHub {
+                gitHub
+                    .supportPart(.gitHub)
+            }
+        }
     }
 
     private var gitHub: some View {
@@ -276,6 +306,12 @@ struct SupportSheetColumn: Layout {
 /// so far. Their bounds go up as a preference, for the tests that hold them inside what shows them.
 enum SupportPart: Hashable {
     case title, files, buttons
+    /// The sheet's outcome: what sending came to, the saved (or not saved) line, the GitHub part.
+    case message, saved, gitHub
+    /// The sheet's scrolling middle as it shows (`middle`), and all it holds (`scrolled`).
+    case middle, scrolled
+    /// The sheet's outcome as it shows.
+    case outcome
 }
 
 struct SupportParts: PreferenceKey {
@@ -287,8 +323,19 @@ struct SupportParts: PreferenceKey {
 }
 
 extension View {
+    /// Marks this view as `part`, keeping the marks of the parts inside it.
     func supportPart(_ part: SupportPart) -> some View {
-        anchorPreference(key: SupportParts.self, value: .bounds) { [part: $0] }
+        transformAnchorPreference(key: SupportParts.self, value: .bounds) { parts, bounds in parts[part] = bounds }
+    }
+}
+
+/// The room the check's window gives the sheet it presents: the size of its own content. For the
+/// test that holds it to the size the window was laid out at.
+struct SupportSheetRoom: PreferenceKey {
+    static let defaultValue: CGSize? = nil
+
+    static func reduce(value: inout CGSize?, nextValue: () -> CGSize?) {
+        value = value ?? nextValue()
     }
 }
 

@@ -1,6 +1,10 @@
 // The touchscreen check's window content: a header, the four steps down the side with their marks,
 // and the step under way: what the device is and Start Check; the touch area with its prompt,
 // countdown and Skip; or the verdict, with Done and Send to Tactile's Developer….
+//
+// It fills the window, whatever size the window took on its display. The header stays at the top
+// and each step's row of buttons at the bottom; on a short display the steps and the step's words
+// scroll between them.
 
 import SwiftUI
 import TactileDevices
@@ -14,13 +18,17 @@ struct SupportCheckView: View {
         // As large as the window's content, whatever size the window took on its display
         // (`SupportCheckWindowFrame`); the sheet is fitted to it.
         GeometryReader { window in
+            let sheet = SupportSendSheet(session: session, room: window.size)
             VStack(alignment: .leading, spacing: 18) {
                 header
                     .supportPart(.title)
                 if let check = session.check {
                     HStack(alignment: .top, spacing: 24) {
-                        SupportStepList(check: check, revision: session.revision)
-                            .frame(width: 220)
+                        ScrollView(.vertical) {
+                            SupportStepList(check: check, revision: session.revision)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(width: 220)
                         Divider()
                         stepContent(check)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -36,8 +44,9 @@ struct SupportCheckView: View {
             .frame(width: window.size.width, height: window.size.height, alignment: .topLeading)
             .background(Color(nsColor: .windowBackgroundColor))
             .sheet(isPresented: $session.isShowingSheet) {
-                SupportSendSheet(session: session, room: window.size)
+                sheet
             }
+            .preference(key: SupportSheetRoom.self, value: sheet.room)
         }
     }
 
@@ -60,24 +69,28 @@ struct SupportCheckView: View {
         switch check.stage {
         case .ready:
             VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Wording.identityLines(check.device, check.identity), id: \.self) { line in
-                        Text(line)
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Wording.identityLines(check.device, check.identity), id: \.self) { line in
+                                Text(line)
+                            }
+                        }
+                        Text(Wording.supportIntro)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if session.macOSMayActToo {
+                            Label(Wording.supportShared, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            Label(Wording.supportLetGo, systemImage: "hand.raised")
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text(Wording.supportIntro)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if session.macOSMayActToo {
-                    Label(Wording.supportShared, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Label(Wording.supportLetGo, systemImage: "hand.raised")
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
                 let availability = session.startAvailability
                 HStack(alignment: .firstTextBaseline) {
                     if let reason = availability == .available ? session.startRefusal : Wording.supportUnavailable(availability) {
@@ -175,27 +188,15 @@ struct SupportTouchArea: View {
                     .fill(Color.accentColor.opacity(0.08))
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Color.accentColor.opacity(0.5), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
-                VStack(spacing: 14) {
-                    Image(systemName: fingers == .one ? "hand.point.up.left" : "hand.raised")
-                        .font(.system(size: 44, weight: .light))
-                        .foregroundStyle(Color.accentColor)
-                    Text(Wording.touchPrompt(fingers))
-                        .font(.title3)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(Wording.fingersSeen(step?.mostFingers ?? 0))
-                        .foregroundStyle(.secondary)
-                    if session.macOSMayActToo {
-                        Text(Wording.supportShared)
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                // Without the hand where there isn't room for it; on a display shorter still, the
+                // words are cut at the area's edges, and Skip stays below.
+                ViewThatFits(in: .vertical) {
+                    prompt(step, hand: true)
+                    prompt(step, hand: false)
                 }
-                .padding(24)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+            .clipped()
             HStack {
                 ProgressView(value: max(0, min(1, left / SupportCheck.stepSeconds)))
                     .frame(width: 160)
@@ -207,6 +208,30 @@ struct SupportTouchArea: View {
             }
             .supportPart(.buttons)
         }
+    }
+
+    private func prompt(_ step: SupportTouchStep?, hand: Bool) -> some View {
+        VStack(spacing: 14) {
+            if hand {
+                Image(systemName: fingers == .one ? "hand.point.up.left" : "hand.raised")
+                    .font(.system(size: 44, weight: .light))
+                    .foregroundStyle(Color.accentColor)
+            }
+            Text(Wording.touchPrompt(fingers))
+                .font(.title3)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(Wording.fingersSeen(step?.mostFingers ?? 0))
+                .foregroundStyle(.secondary)
+            if session.macOSMayActToo {
+                Text(Wording.supportShared)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(24)
     }
 }
 
@@ -228,19 +253,23 @@ struct SupportVerdictView: View {
     /// A check that didn't run its course: no verdict, nothing to send.
     private func interrupted(_ interruption: SupportCheck.Interruption) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: "exclamationmark.arrow.circlepath")
-                    .font(.system(size: 34))
-                    .foregroundStyle(.orange)
-                Text(Wording.interruptedTitle)
-                    .font(.title.weight(.semibold))
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.arrow.circlepath")
+                            .font(.system(size: 34))
+                            .foregroundStyle(.orange)
+                        Text(Wording.interruptedTitle)
+                            .font(.title.weight(.semibold))
+                    }
+                    Text(Wording.supportInterruption(interruption))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(Wording.tryAgain)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Text(Wording.supportInterruption(interruption))
-                .fixedSize(horizontal: false, vertical: true)
-            Text(Wording.tryAgain)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
             HStack {
                 Spacer()
                 Button(Wording.supportDone) { session.close() }
@@ -254,21 +283,25 @@ struct SupportVerdictView: View {
     private var finished: some View {
         let verdict = check.verdict
         return VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: symbol(verdict))
-                    .font(.system(size: 34))
-                    .foregroundStyle(colour(verdict))
-                Text(Wording.verdictTitle(verdict))
-                    .font(.title.weight(.semibold))
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 12) {
+                        Image(systemName: symbol(verdict))
+                            .font(.system(size: 34))
+                            .foregroundStyle(colour(verdict))
+                        Text(Wording.verdictTitle(verdict))
+                            .font(.title.weight(.semibold))
+                    }
+                    Text(Wording.verdictSentence(check.verdictReason))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if verdict == .worksFully {
+                        Text(Wording.worksFullyThanks)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Text(Wording.verdictSentence(check.verdictReason))
-                .fixedSize(horizontal: false, vertical: true)
-            if verdict == .worksFully {
-                Text(Wording.worksFullyThanks)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
             HStack {
                 if verdict == .worksFully {
                     Button(Wording.sendAnyway) { session.showSheet() }
