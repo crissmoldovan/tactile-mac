@@ -90,7 +90,7 @@ Accessibility and Input Monitoring survive an update, because the bundle identif
 
 ## Touchscreen reports
 
-Not part of updating, but answered by the same site, under the same rules: only the official build asks it (`SupportSending`, from `UpdateAvailability`), at the site its updates ask, and the site is only a courier, holding no secret of the app's. **Help Me Support This Touchscreen…** checks a touchscreen and makes a report; the person sees every file of it, and nothing is sent until they press **Send**.
+Not part of updating, but answered by the same site, under the same rules: only the official build asks it (`SupportSending`, from `UpdateAvailability`), at the site its updates ask, and the site is only a courier, holding no secret of the app's. The touchscreen check (**Touchscreen Check** in Settings, or **Check This Touchscreen…**) checks a touchscreen and makes a report; the person sees every file of it, and nothing is sent until they press **Send**.
 
 - **`GET /api/support/status`**, when the person presses **Send** and never before, with a 5-second limit. Only `{"available": true}`, with 200, from the site, lets the report go. Anything else, an error or the limit means sending isn't switched on: nothing is uploaded, and the app offers **Save Report…**.
 - **Stopping.** **Stop Sending**, Esc, or closing the window while a report goes cancels the request. Before the upload began, nothing was sent; after, the app says the report may already have arrived, that nothing is filed until the person confirms by email, and that ignoring that email keeps it from being filed. While Tactile quits, this is logged rather than shown, so quitting never waits.

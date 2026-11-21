@@ -11,6 +11,9 @@ typealias PerformCommand = @MainActor (AppCommand) -> Void
 struct StatusDot: View {
     var indicator: StatusIndicator
 
+    /// Its width and height.
+    static let size: CGFloat = 8
+
     var body: some View {
         Group {
             if indicator == .inactive {
@@ -19,7 +22,7 @@ struct StatusDot: View {
                 Circle().fill(color)
             }
         }
-        .frame(width: 8, height: 8)
+        .frame(width: Self.size, height: Self.size)
         .accessibilityHidden(true)
     }
 

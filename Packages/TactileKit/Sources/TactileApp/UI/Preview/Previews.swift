@@ -79,7 +79,13 @@ struct SetUpPreviewDesk: View {
                         Color.gray
                         SetUpBackdrop(screen: screen, displaySize: size)
                         if screen.hasControls {
-                            SetUpControls(screen: screen, displaySize: size, perform: { model.perform($0) })
+                            SetUpControls(
+                                screen: screen, displaySize: size, perform: { model.perform($0) },
+                                check: { id in
+                                    // Leaves set-up mode; the preview opens no check, which reads devices.
+                                    SetUpSupportCheck.leaveThenCheck(
+                                        id, perform: { model.perform($0) }, snapshot: { model.snapshot }, open: { _ in })
+                                })
                                 .frame(width: size.width, height: size.height, alignment: alignment(screen.placement))
                                 .offset(y: offset(screen.placement, height: size.height))
                         }

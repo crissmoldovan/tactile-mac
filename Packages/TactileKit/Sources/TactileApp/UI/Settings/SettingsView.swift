@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The Settings window: touchscreens in a sidebar, connected first with a status dot each and the
-/// remembered ones greyed, then General; the selected one's pane beside it.
+/// remembered ones greyed, then General and Touchscreen Check; the selected one's pane beside it.
 ///
 /// It reads `model.steadySnapshot` (the snapshot without the gesture tester's feed, which it never
 /// shows, so a gesture in the tester doesn't draw it again) and sends `model.perform`, nothing else.
@@ -16,12 +16,14 @@ public struct SettingsView<Model: AppModel>: View {
     @State private var highlightRefresh = 0
     /// A pane asked for from the menu (Settings for <name>…).
     private let paneRequests = SettingsPaneRequests.shared
-    /// General's touch devices Tactile doesn't list: the app's; nil in previews, which watch nothing.
+    /// Touchscreen Check's touch devices Tactile doesn't list: the app's, watched while the pane is
+    /// shown; in previews, the preview desk's, and nothing is watched.
     private let notListed: NotListedDevices?
 
-    /// The app's Settings, whose General lists the touch devices Tactile doesn't.
+    /// The app's Settings, whose Touchscreen Check lists the touch devices Tactile doesn't.
     public init(model: Model) {
-        self.init(model: model, selection: nil, notListed: model is TactileModel ? NotListedDevices.shared : nil)
+        let notListed = model is TactileModel ? NotListedDevices.shared : NotListedDevices(fixed: PreviewDesk.notListedDevices)
+        self.init(model: model, selection: nil, notListed: notListed)
     }
 
     init(model: Model, selection: SidebarItem?, notListed: NotListedDevices? = nil) {
@@ -97,9 +99,19 @@ struct SettingsSidebar: View {
                 }
             }
             Section {
-                SidebarGeneralRow()
-                    .badge(snapshot.warnings.count)
-                    .tag(SidebarItem.general)
+                ForEach(SidebarItem.belowTouchscreens, id: \.self) { item in
+                    switch item {
+                    case .general:
+                        SidebarGeneralRow()
+                            .badge(snapshot.warnings.count)
+                            .tag(item)
+                    case .touchscreenCheck:
+                        SidebarCheckRow()
+                            .tag(item)
+                    case .touchscreen:
+                        EmptyView()
+                    }
+                }
             }
         }
         .listStyle(.sidebar)
@@ -128,6 +140,12 @@ struct SidebarGeneralRow: View {
     }
 }
 
+struct SidebarCheckRow: View {
+    var body: some View {
+        Label(Wording.touchscreenCheck, systemImage: SidebarItem.touchscreenCheckSymbol)
+    }
+}
+
 /// The pane for what the sidebar has selected.
 struct SettingsDetail: View {
     var snapshot: AppSnapshot
@@ -135,19 +153,21 @@ struct SettingsDetail: View {
     var perform: PerformCommand
     /// The model's snapshot as it is when called (see `TouchscreenPane.snapshotNow`).
     var snapshotNow: (@MainActor () -> AppSnapshot)? = nil
-    /// General's touch devices Tactile doesn't list; nil where nothing is watched.
+    /// Touchscreen Check's touch devices Tactile doesn't list; nil where there are none to show.
     var notListed: NotListedDevices? = nil
 
     var body: some View {
         switch item {
         case .general:
-            GeneralPane(snapshot: snapshot, perform: perform, notListed: notListed)
+            GeneralPane(snapshot: snapshot, perform: perform)
+        case .touchscreenCheck:
+            TouchscreenCheckPane(snapshot: snapshot, perform: perform, notListed: notListed)
         case .touchscreen(let id):
             if let touchscreen = snapshot.touchscreens.first(where: { $0.id == id }) {
                 TouchscreenPane(touchscreen: touchscreen, snapshot: snapshot, perform: perform, snapshotNow: snapshotNow)
                     .id(id)
             } else {
-                GeneralPane(snapshot: snapshot, perform: perform, notListed: notListed)
+                GeneralPane(snapshot: snapshot, perform: perform)
             }
         }
     }

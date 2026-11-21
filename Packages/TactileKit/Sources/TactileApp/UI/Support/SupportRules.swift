@@ -1,9 +1,11 @@
 // The touchscreen check's interface rules, kept pure so they are tested: where the check is offered,
-// which devices Touchscreen Not Listed? shows, each step's mark, what the "what will be sent"
-// sheet offers at each stage, and the sizes of the check's window, its sheet and the file viewer.
+// which devices Touchscreen Check lists as not listed, each step's mark, what the "what will be
+// sent" sheet offers at each stage, and the sizes of the check's window, its sheet and the file
+// viewer.
 
 import Foundation
 import TactileDevices
+import TactileScreens
 import TactileSupport
 
 /// Where Tactile's issue form for touchscreens is.
@@ -21,7 +23,8 @@ enum SupportClosingNotice {
     }
 }
 
-/// Whether Help Me Support This Touchscreen… can start now, for a touchscreen Tactile lists.
+/// Whether a check can start now: Check This Touchscreen… and Check…, for a touchscreen Tactile lists
+/// or a device it doesn't.
 enum SupportCheckAvailability: Equatable, Sendable {
     case available
     case notConnected
@@ -39,10 +42,29 @@ enum SupportCheckAvailability: Equatable, Sendable {
     /// with macOS, is just the kind to check), unless it has stopped answering, a set-up runs or,
     /// `finishing`, an earlier check of it is still letting go.
     static func of(_ touchscreen: TouchscreenSnapshot, in snapshot: AppSnapshot, finishing: Bool = false) -> SupportCheckAvailability {
+        let leaving = leavingSetUp(touchscreen, finishing: finishing)
+        guard leaving != .notConnected, leaving != .stoppedAnswering else { return leaving }
+        return snapshot.setUp != nil || snapshot.setUpMode != nil ? .setUpRunning : leaving
+    }
+
+    /// As `of`, once set-up has let go: for set-up mode's session card, whose Check leaves set-up
+    /// mode first.
+    static func leavingSetUp(_ touchscreen: TouchscreenSnapshot, finishing: Bool = false) -> SupportCheckAvailability {
         guard touchscreen.isConnected else { return .notConnected }
         if touchscreen.status == .stoppedAnswering { return .stoppedAnswering }
-        if snapshot.setUp != nil || snapshot.setUpMode != nil { return .setUpRunning }
         return available.whileFinishing(finishing)
+    }
+
+    /// For a device Tactile doesn't list, by the same rule, in this order: not once a check found it
+    /// had stopped answering, nor while a set-up runs, nor while an earlier check of it is still
+    /// letting go, as `finishing` has them.
+    @MainActor
+    static func of(device: SupportDevice, in snapshot: AppSnapshot, finishing: SupportChecksFinishing)
+        -> SupportCheckAvailability
+    {
+        if finishing.hasStoppedAnswering(device) { return .stoppedAnswering }
+        if snapshot.setUp != nil || snapshot.setUpMode != nil { return .setUpRunning }
+        return available.whileFinishing(finishing.isFinishing(device: device.id))
     }
 
     /// This, or `lastCheckFinishing` when it would be available and an earlier check is still
@@ -69,11 +91,64 @@ enum SupportDeviceMatching {
             ?? candidates.first { $0.location == nil }
     }
 
-    /// Touchscreen Not Listed?'s devices: every device the check can check that isn't a connected
-    /// touchscreen Tactile lists.
+    /// The devices Tactile doesn't list, in Touchscreen Check: every device the check can check that
+    /// isn't a connected touchscreen Tactile lists.
     static func unlisted(_ devices: [SupportDevice], in snapshot: AppSnapshot) -> [SupportDevice] {
         let listed = Set(snapshot.touchscreens.filter(\.isConnected).compactMap { device(for: $0, among: devices)?.id })
         return devices.filter { !listed.contains($0.id) }
+    }
+}
+
+/// What Touchscreen Check, the sidebar's pane, lists: every connected touchscreen Tactile lists, in
+/// the sidebar's order, then the touch devices it doesn't list. Each has Check…, enabled or disabled
+/// by `SupportCheckAvailability`, with the reason when it can't be used.
+struct TouchscreenCheckList: Equatable {
+    /// A connected touchscreen Tactile lists.
+    struct Listed: Equatable, Identifiable {
+        var id: TouchscreenID
+        var name: String
+        /// Its device's own name, beneath, when the touchscreen has a name of its own; nil otherwise.
+        var deviceName: String?
+        var availability: SupportCheckAvailability
+        var target: SupportTarget
+
+        var reason: String? { availability == .available ? nil : Wording.supportUnavailable(availability) }
+    }
+
+    /// A touch device Tactile doesn't list.
+    struct Unlisted: Equatable, Identifiable {
+        var device: SupportDevice
+        /// Its own name, or its USB ID.
+        var name: String
+        /// What kind it is, and its USB ID.
+        var detail: String
+        var availability: SupportCheckAvailability
+
+        var id: String { device.id }
+        var reason: String? { availability == .available ? nil : Wording.supportUnavailable(availability) }
+    }
+
+    var listed: [Listed]
+    var unlisted: [Unlisted]
+
+    /// `devices` are the check's devices as its probe finds them; `finishing`, the checks still
+    /// letting go and the devices found to have stopped answering.
+    @MainActor
+    init(_ snapshot: AppSnapshot, devices: [SupportDevice], finishing: SupportChecksFinishing) {
+        listed = snapshot.touchscreens.filter(\.isConnected).map { touchscreen in
+            Listed(
+                id: touchscreen.id, name: touchscreen.name,
+                deviceName: touchscreen.deviceName.isEmpty || touchscreen.deviceName == touchscreen.name
+                    ? nil : touchscreen.deviceName,
+                availability: SupportCheckAvailability.of(
+                    touchscreen, in: snapshot, finishing: finishing.isFinishing(touchscreen.id)),
+                target: SupportTarget(touchscreen))
+        }
+        unlisted = SupportDeviceMatching.unlisted(devices, in: snapshot).map { device in
+            Unlisted(
+                device: device, name: Wording.supportDeviceName(device), detail: Wording.notListedDetail(device),
+                availability: SupportCheckAvailability.of(device: device, in: snapshot, finishing: finishing))
+        }
     }
 }
 

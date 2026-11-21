@@ -58,7 +58,7 @@ struct SupportCheckView: View {
                     .font(.title2.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(Wording.helpMeSupport.replacingOccurrences(of: "…", with: ""))
+                Text(Wording.checkThisTouchscreen.replacingOccurrences(of: "…", with: ""))
                     .foregroundStyle(.secondary)
             }
         }

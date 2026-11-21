@@ -487,7 +487,8 @@ final class SupportCheckSessionTests: XCTestCase {
         await Task.yield()
     }
 
-    /// The pane's and the menu's Help Me Support say the same while a check is still letting go.
+    /// The header's, the pane's and the menu's Check This Touchscreen… say the same while a check is still
+    /// letting go.
     func testTheEntriesWaitWhileALastCheckIsFinishing() throws {
         let snapshot = PreviewModel(.desk).snapshot
         let ilitek = try XCTUnwrap(snapshot.touchscreens.first { $0.id == UIFixtures.ilitek })
@@ -1109,8 +1110,9 @@ final class SupportCheckSessionTests: XCTestCase {
         let viewer = SupportSheetFit.viewer(on: sheet)
         try render(SupportFileViewer(file: try XCTUnwrap(session.archive?.files.first), room: sheet), size: viewer,
                    to: out, name: "support-6-viewer")
-        try render(Form { NotListedSection(snapshot: PreviewModel(.desk).snapshot, perform: { _ in }, list: nil) }.formStyle(.grouped),
-                   size: CGSize(width: 560, height: 220), to: out, name: "support-7-not-listed")
+        try render(TouchscreenCheckPane(snapshot: PreviewModel(.desk).snapshot, perform: { _ in },
+                                        notListed: NotListedDevices(fixed: PreviewDesk.notListedDevices)),
+                   size: CGSize(width: 600, height: 560), to: out, name: "support-7-touchscreen-check")
 
         let refusing = FakeModel()
         refusing.snapshot.setUpMode = SetUpModeSnapshot(stage: .choosing, displays: [], touchscreens: [], justSetUp: nil, notice: nil)

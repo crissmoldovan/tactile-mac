@@ -1,8 +1,9 @@
 // What set-up mode's overview draws (see `SetUpModePlan.swift`): on the chosen display, a large
 // "Now touch this screen" on the bright backdrop and a card with Back below it; on every other
 // candidate display, its card in the middle, over a dimmed backdrop; and the session card, on the
-// built-in display or beside the first candidate's card. Cards are the only part that acts on a
-// click; the backdrop swallows the rest (`SetUpScreen.backdropTakesMouse`).
+// built-in display or beside the first candidate's card, with its way to the touchscreen check.
+// Cards are the only part that acts on a click; the backdrop swallows the rest
+// (`SetUpScreen.backdropTakesMouse`).
 
 import SwiftUI
 import TactileScreens
@@ -46,6 +47,8 @@ struct SetUpModeControls: View {
     var mouseHint: String
     var scale: CGFloat
     var perform: PerformCommand
+    /// The session card's Check This Touchscreen… and Check….
+    var check: CheckTouchscreen = { _ in }
 
     var body: some View {
         HStack(alignment: .top, spacing: 20 * scale) {
@@ -59,7 +62,7 @@ struct SetUpModeControls: View {
                 }
             }
             if let session = overview.session {
-                SetUpModeSessionView(session: session, scale: scale, perform: perform)
+                SetUpModeSessionView(session: session, scale: scale, perform: perform, check: check)
             }
         }
     }
@@ -216,11 +219,21 @@ struct SetUpModeCardView: View {
 }
 
 /// The session card: what set-up mode is for and how it goes, one line per touchscreen, the latest
-/// notice, Back after a touch first, and Finish.
+/// notice, Back after a touch first, the way to the touchscreen check, and Finish. The check is Check
+/// This Touchscreen… beside "Touch not working right?" with one touchscreen, and Check… on each line
+/// with several (`SetUpModeSession.checkOffer`): buttons, for the mouse, since touch may not work.
 struct SetUpModeSessionView: View {
     var session: SetUpModeSession
     var scale: CGFloat
     var perform: PerformCommand
+    /// Leaves set-up mode, then opens the check (`SetUpSupportCheck`).
+    var check: CheckTouchscreen = { _ in }
+
+    /// Whether `id` can be checked once set-up mode has let go of it, and no earlier check of it is
+    /// still letting go.
+    private func availability(_ id: TouchscreenID) -> SupportCheckAvailability {
+        (session.checks[id] ?? .notConnected).whileFinishing(SupportChecksFinishing.shared.isFinishing(id))
+    }
 
     var body: some View {
         SetUpCard(scale: scale) {
@@ -239,7 +252,10 @@ struct SetUpModeSessionView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 10 * scale) {
                     ForEach(session.lines) { line in
-                        SetUpModeLineView(line: line, scale: scale)
+                        SetUpModeLineView(
+                            line: line, scale: scale,
+                            check: session.checkOffer == .eachLine ? availability(line.id) : nil,
+                            onCheck: { check(line.id) })
                     }
                 }
                 if let notice = session.notice {
@@ -258,6 +274,7 @@ struct SetUpModeSessionView: View {
                             .setUpControlSize(scale)
                     }
                 }
+                checkRow
                 Divider()
                 HStack(spacing: 10 * scale) {
                     Text(Wording.setUpModeEscLeaves)
@@ -270,6 +287,21 @@ struct SetUpModeSessionView: View {
             .frame(width: 400 * scale, alignment: .leading)
         }
         .accessibilityElement(children: .contain)
+    }
+
+    /// "Touch not working right?": with one touchscreen, Check This Touchscreen… beside it
+    /// (`SetUpCheckRow`); with several, where their Check… is.
+    @ViewBuilder private var checkRow: some View {
+        switch session.checkOffer {
+        case .one(let id)?:
+            SetUpCheckRow(touchscreen: id, availability: session.checks[id] ?? .notConnected, scale: scale, check: check)
+        case .eachLine?:
+            Text(Wording.setUpModeCheckEachLine)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        case nil:
+            EmptyView()
+        }
     }
 }
 
@@ -290,10 +322,14 @@ private struct SetUpModeTouchedLine: View {
     }
 }
 
-/// A touchscreen on the session card: its name and state, and why it can't be set up.
+/// A touchscreen on the session card: its name and state, and why it can't be set up; with several
+/// touchscreens, Check… beside its state, and why that can't be used when it can't.
 private struct SetUpModeLineView: View {
     var line: SetUpTouchscreenLine
     var scale: CGFloat
+    /// Whether Check… can be used; nil: not shown.
+    var check: SupportCheckAvailability?
+    var onCheck: @MainActor () -> Void = {}
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 9 * scale) {
@@ -306,9 +342,16 @@ private struct SetUpModeLineView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 8)
+                    // Which display it is on reads in full; a long name gives way first.
                     Text(Wording.setUpModeLine(line.state))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .layoutPriority(1)
+                    if let check {
+                        Button { onCheck() } label: { SetUpButtonLabel(title: Wording.checkButton, scale: scale) }
+                            .disabled(check != .available)
+                            .controlSize(scale > 1.2 ? .large : .regular)
+                    }
                 }
                 if line.state == .cannotBeSetUp, let reason = line.reason {
                     Text(reason)
@@ -316,9 +359,15 @@ private struct SetUpModeLineView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let check, check != .available {
+                    Text(Wording.supportUnavailable(check))
+                        .font(.system(size: 12 * scale))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: check == nil ? .combine : .contain)
     }
 
     @ViewBuilder private var icon: some View {

@@ -1,5 +1,7 @@
-// Every word of the touchscreen check: the entries that start it, its window, its steps, its verdict
-// and the "what will be sent" sheet. Short sentences, British spelling, typographic apostrophes.
+// Every word of the touchscreen check: the entries that start it (Touchscreen Check in the sidebar,
+// Check This Touchscreen… in a touchscreen's header, in its details beside the menu and on set-up
+// mode's session card), its window, its steps, its verdict and the "what will be sent" sheet. Short
+// sentences, British spelling, typographic apostrophes.
 
 import Foundation
 import TactileDevices
@@ -9,10 +11,18 @@ extension Wording {
 
     // MARK: - Where it starts
 
-    static let helpMeSupport = "Help Me Support This Touchscreen…"
-    static let supportLabel = "Touchscreen support"
-    static let supportExplanation =
-        "Check what this touchscreen sends. You can then send the results to Tactile’s developer, to help it work fully."
+    /// A touchscreen's header, its details beside the menu, and set-up mode's session card with one
+    /// touchscreen.
+    static let checkThisTouchscreen = "Check This Touchscreen…"
+    /// The sidebar's item, its pane's title, and the check window's title.
+    static let touchscreenCheck = "Touchscreen Check"
+    /// What the pane is for, in a line.
+    static let checkIntro =
+        "Check what a touchscreen sends. You can then send the results to Tactile’s developer, to help it work fully."
+    /// Set-up mode's session card: one touchscreen, with Check This Touchscreen… beside it.
+    static let setUpModeCheckLine = "Touch not working right?"
+    /// Set-up mode's session card: several touchscreens, each line with Check….
+    static let setUpModeCheckEachLine = "Touch not working right? Click Check… beside the touchscreen."
 
     static func supportUnavailable(_ reason: SupportCheckAvailability) -> String {
         switch reason {
@@ -60,7 +70,7 @@ extension Wording {
 
     // MARK: - The window
 
-    static func supportWindowTitle(name: String) -> String { "Touchscreen Check: \(name)" }
+    static func supportWindowTitle(name: String) -> String { "\(touchscreenCheck): \(name)" }
 
     static let supportIntro =
         "This takes a minute. Tactile reads what the touchscreen says about itself, takes it as it always does, and asks you "

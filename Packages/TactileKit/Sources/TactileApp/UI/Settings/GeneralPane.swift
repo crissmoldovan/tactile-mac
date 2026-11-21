@@ -1,23 +1,20 @@
 import SwiftUI
 
 /// General, in `order`: the warnings, when there are any, each with its button; Tactile on or off,
-/// and Launch at login; Touchscreen Not Listed? (`NotListedSection`), near the top, where a person
-/// whose touchscreen Tactile doesn't list looks first; diagnostics (debug logging, recording frames,
-/// Copy diagnostics); Experimental (Swipes follow the fingers); Updates (`UpdatesSection`); the
-/// version.
+/// and Launch at login; diagnostics (debug logging, recording frames, Copy diagnostics); Experimental
+/// (Swipes follow the fingers); Updates (`UpdatesSection`); the version. The touch devices Tactile
+/// doesn't list are in Touchscreen Check, after General in the sidebar.
 struct GeneralPane: View {
     var snapshot: AppSnapshot
     var perform: PerformCommand
-    /// The touch devices Tactile doesn't list, in the app; nil where nothing is watched.
-    var notListed: NotListedDevices? = nil
 
     /// General's groups.
     enum Group: CaseIterable, Hashable {
-        case warnings, tactile, notListed, diagnostics, experimental, updates, version
+        case warnings, tactile, diagnostics, experimental, updates, version
     }
 
     /// The order the groups are shown in.
-    static let order: [Group] = [.warnings, .tactile, .notListed, .diagnostics, .experimental, .updates, .version]
+    static let order: [Group] = [.warnings, .tactile, .diagnostics, .experimental, .updates, .version]
 
     var body: some View {
         Form {
@@ -49,8 +46,6 @@ struct GeneralPane: View {
                 .toggleStyle(.switch)
                 LaunchAtLoginRowView(row: LaunchAtLoginRow(snapshot.launchAtLogin), perform: perform)
             }
-        case .notListed:
-            NotListedSection(snapshot: snapshot, perform: perform, list: notListed)
         case .diagnostics:
             Section {
                 Toggle(isOn: Binding(get: { snapshot.debugLogging }, set: { perform(.setDebugLogging($0)) })) {

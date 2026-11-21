@@ -6,8 +6,8 @@ import TactileSupport
 import XCTest
 
 /// The touchscreen check's interface, as rules and words: where it is offered, which devices
-/// Touchscreen Not Listed? shows, what each step says, and what the "what will be sent" sheet offers
-/// at each stage. No window is opened, and no device.
+/// Touchscreen Check lists as not listed, what each step says, and what the "what will be sent"
+/// sheet offers at each stage. No window is opened, and no device.
 @MainActor
 final class SupportCheckInterfaceTests: XCTestCase {
 
@@ -57,7 +57,7 @@ final class SupportCheckInterfaceTests: XCTestCase {
         XCTAssertEqual(twin.support, .available, "offered even where nothing else is")
     }
 
-    // MARK: - Touchscreen Not Listed?
+    // MARK: - The devices Tactile doesn't list
 
     func testNotListedShowsWhatTactileDoesntList() throws {
         let snapshot = PreviewModel(.desk).snapshot
@@ -250,7 +250,7 @@ final class SupportCheckInterfaceTests: XCTestCase {
 
     func testEveryWordIsWrittenWithTypographicApostrophes() {
         let words = [
-            Wording.helpMeSupport, Wording.supportExplanation, Wording.notListedExplanation, Wording.notListedNone,
+            Wording.checkThisTouchscreen, Wording.checkIntro, Wording.notListedExplanation, Wording.notListedNone,
             Wording.supportIntro, Wording.supportLetGo, Wording.supportStepSentence(0, kind: .touchscreen),
             Wording.supportStepSentence(1, kind: .mouseOnly), Wording.supportStepSentence(2, kind: .touchscreen),
             Wording.supportStepSentence(1, kind: .digitizer, hasTouchInterface: false),

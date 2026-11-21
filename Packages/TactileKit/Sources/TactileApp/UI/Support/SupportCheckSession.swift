@@ -46,7 +46,7 @@ struct SupportSessionEnvironment {
 }
 
 /// The checks closed during a read that haven't let go of their device yet: a new check of the same
-/// device couldn't open it, so Start Check, and Help Me Support in the pane and the menu, wait for
+/// device couldn't open it, so Start Check, and every Check This Touchscreen… and Check…, wait for
 /// them (`SupportCheckAvailability.lastCheckFinishing`). Each clears by itself when its check lets go.
 ///
 /// It also keeps the devices a check found had stopped answering, by the IDs of their interfaces, so

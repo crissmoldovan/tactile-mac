@@ -36,7 +36,7 @@ body:
     attributes:
       label: Tactile's report (optional)
       description: |
-        If you ran **Help Me Support This Touchscreen…** in Tactile and saved its report, drag the zip here. It holds no serial number and no personal data: only the files Tactile listed before you saved it. Remember that issues are public.
+        If you checked the touchscreen in Tactile (**Touchscreen Check** in Settings, or **Check This Touchscreen…**) and saved its report, drag the zip here. It holds no serial number and no personal data: only the files Tactile listed before you saved it. Remember that issues are public.
   - type: dropdown
     id: works
     attributes:

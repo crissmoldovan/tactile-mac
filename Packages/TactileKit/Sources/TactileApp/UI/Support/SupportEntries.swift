@@ -1,10 +1,10 @@
-// Where the touchscreen check starts: Help Me Support This Touchscreen… in a connected touchscreen's
-// pane and in its details beside the menu; and Touchscreen Not Listed? in General, which lists the
-// touch devices Tactile doesn't (digitisers, and touchscreens that only act as a mouse), each with
-// Check….
+// What the entries to the touchscreen check share: what the check needs of a touchscreen Tactile
+// lists, and the touch devices it doesn't list (digitisers, and touchscreens that only act as a
+// mouse). The entries are Touchscreen Check in the sidebar (`TouchscreenCheckPane`), Check This
+// Touchscreen… in a touchscreen's header (`TouchscreenHeader`) and in its details beside the menu
+// (`TouchscreenDetailsView`), and set-up mode's session card (`SetUpModeSessionView`).
 
 import Observation
-import SwiftUI
 import TactileDevices
 import TactileScreens
 
@@ -27,43 +27,31 @@ struct SupportTarget: Equatable, Sendable {
     }
 }
 
-/// The pane's group: what the check is for, and Help Me Support This Touchscreen….
-struct SupportSection: View {
-    var touchscreen: TouchscreenSnapshot
-    var snapshot: AppSnapshot
-    var perform: PerformCommand
-
-    var body: some View {
-        let availability = SupportCheckAvailability.of(
-            touchscreen, in: snapshot, finishing: SupportChecksFinishing.shared.isFinishing(touchscreen.id))
-        Section {
-            LabeledContent {
-                Button(Wording.helpMeSupport) { SupportCheckWindow.open(SupportTarget(touchscreen), perform: perform) }
-                    .disabled(availability != .available)
-                    .help(availability == .available ? "" : Wording.supportUnavailable(availability))
-            } label: {
-                ExplainedLabel(title: Wording.supportLabel, explanation: Wording.supportExplanation)
-            }
-        } footer: {
-            if availability != .available {
-                Footnote(Wording.supportUnavailable(availability))
-            }
-        }
-    }
-}
-
-/// The touch devices Tactile doesn't list, as the check's probe finds them: listed while General is
-/// shown, and not watched otherwise. Watching opens nothing.
+/// The touch devices Tactile doesn't list, as the check's probe finds them: listed while Touchscreen
+/// Check is shown, and not watched otherwise. Watching opens nothing.
 @MainActor
 @Observable
 final class NotListedDevices {
     static let shared = NotListedDevices()
 
-    private(set) var devices: [SupportDevice] = []
+    private(set) var devices: [SupportDevice]
     @ObservationIgnored private var probe: SupportProbe?
+    /// A list given once, for renders and previews: nothing is watched.
+    private let isFixed: Bool
+
+    init() {
+        devices = []
+        isFixed = false
+    }
+
+    /// Always `devices`: no probe is started.
+    init(fixed devices: [SupportDevice]) {
+        self.devices = devices
+        isFixed = true
+    }
 
     func start() {
-        guard probe == nil else { return }
+        guard !isFixed, probe == nil else { return }
         let probe = SupportProbe()
         probe.onDevicesChanged = { [weak self] in self?.devices = self?.probe?.devices ?? [] }
         probe.start()
@@ -72,40 +60,9 @@ final class NotListedDevices {
     }
 
     func stop() {
+        guard !isFixed else { return }
         probe?.stop()
         probe = nil
         devices = []
-    }
-}
-
-/// General's Touchscreen Not Listed?. Without a list (renders, previews), it says only what it is for.
-struct NotListedSection: View {
-    var snapshot: AppSnapshot
-    var perform: PerformCommand
-    var list: NotListedDevices?
-
-    var body: some View {
-        let devices = list.map { SupportDeviceMatching.unlisted($0.devices, in: snapshot) } ?? []
-        Section {
-            if devices.isEmpty {
-                Text(Wording.notListedNone)
-                    .foregroundStyle(.secondary)
-            }
-            ForEach(devices, id: \.id) { device in
-                LabeledContent {
-                    Button(Wording.checkButton) { SupportCheckWindow.open(device, perform: perform) }
-                        .disabled(snapshot.setUp != nil || snapshot.setUpMode != nil)
-                } label: {
-                    Text(Wording.supportDeviceName(device))
-                    Text(Wording.notListedDetail(device))
-                }
-            }
-        } header: {
-            Text(Wording.notListedTitle)
-        } footer: {
-            Footnote(Wording.notListedExplanation)
-        }
-        .onAppear { list?.start() }
-        .onDisappear { list?.stop() }
     }
 }

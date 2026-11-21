@@ -35,6 +35,7 @@
 
 import AppKit
 import SwiftUI
+import TactileScreens
 import os
 
 @MainActor
@@ -60,6 +61,8 @@ public final class SetUpOverlay {
     private var windows: [UInt32: ScreenWindows] = [:]
     private var plan: [SetUpScreen] = []
     private var perform: PerformCommand = { _ in }
+    /// The session card's Check This Touchscreen… and Check….
+    private var check: CheckTouchscreen = { _ in }
     private var keyMonitor: Any?
     private var globalKeyMonitor: Any?
     private var screenObserver: NSObjectProtocol?
@@ -82,9 +85,11 @@ public final class SetUpOverlay {
     /// Puts up, changes or takes down the screens to match `presentation` (see `SetUpPresentation`),
     /// carrying over from the plan shown until now what only it can tell (see
     /// `SetUpScreens.following`). A set-up with no displays for a moment keeps its screens as they
-    /// are.
-    func show(_ presentation: SetUpPresentation, perform: @escaping PerformCommand) {
+    /// are. `check` is what the session card's Check This Touchscreen… and Check… do.
+    func show(_ presentation: SetUpPresentation, perform: @escaping PerformCommand,
+              check: @escaping CheckTouchscreen = { _ in }) {
         self.perform = perform
+        self.check = check
         switch presentation.change {
         case .takeDown:
             plan = []
@@ -190,7 +195,8 @@ public final class SetUpOverlay {
             return
         }
         let root = SetUpControls(
-            screen: screen, displaySize: nsScreen.frame.size, perform: { [weak self] command in self?.send(command) })
+            screen: screen, displaySize: nsScreen.frame.size, perform: { [weak self] command in self?.send(command) },
+            check: { [weak self] id in self?.checkPressed(id) })
         let view: FirstClickHostingView<SetUpControls>
         let panel: SetUpControlsPanel
         if let existing = windows.controls, let existingView = windows.controlsView {
@@ -301,6 +307,11 @@ public final class SetUpOverlay {
     private func send(_ command: AppCommand) {
         InterfaceLog.log.info("set-up: \(Self.describe(command), privacy: .public) pressed")
         perform(command)
+    }
+
+    private func checkPressed(_ id: TouchscreenID) {
+        InterfaceLog.log.info("set-up: Check This Touchscreen… or Check… pressed; leaving the set-up first")
+        check(id)
     }
 
     private func tearDown() {

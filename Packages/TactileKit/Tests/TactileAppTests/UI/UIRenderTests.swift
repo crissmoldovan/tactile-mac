@@ -33,18 +33,20 @@ final class UIRenderTests: XCTestCase {
     func testRenderTheSettingsWindow() throws {
         for variant in PreviewModel.Variant.allCases {
             let snapshot = PreviewModel(variant).snapshot
-            var items = snapshot.touchscreens.map { SidebarItem.touchscreen($0.id) }
-            items.append(.general)
+            let items = snapshot.touchscreens.map { SidebarItem.touchscreen($0.id) } + SidebarItem.belowTouchscreens
             for item in items {
                 let pane: String
                 switch item {
                 case .general: pane = "general"
+                case .touchscreenCheck: pane = "touchscreen-check"
                 case .touchscreen(let id): pane = Self.slug(snapshot.touchscreens.first { $0.id == id }?.name ?? "x")
                 }
+                let notListed = item == .touchscreenCheck ? NotListedDevices(fixed: PreviewDesk.notListedDevices) : nil
                 for dark in [false, true] {
                     let size = SettingsView<PreviewModel>.minimumSize
                     try render(
-                        SettingsRenderFrame(snapshot: snapshot, item: item).frame(width: size.width, height: size.height),
+                        SettingsRenderFrame(snapshot: snapshot, item: item, notListed: notListed)
+                            .frame(width: size.width, height: size.height),
                         size: size, dark: dark, name: "settings-\(variant.rawValue)-\(pane)")
                 }
             }
@@ -597,10 +599,11 @@ private struct StandInDesktop: View {
 }
 
 /// The Settings window as drawn for the images: a stand-in sidebar of the real row views, and the
-/// real pane.
-private struct SettingsRenderFrame: View {
+/// real pane. Touchscreen Check lists `notListed` as the touch devices Tactile doesn't list.
+struct SettingsRenderFrame: View {
     var snapshot: AppSnapshot
     var item: SidebarItem
+    var notListed: NotListedDevices? = nil
 
     var body: some View {
         HStack(spacing: 0) {
@@ -623,6 +626,7 @@ private struct SettingsRenderFrame: View {
                             .foregroundStyle(.secondary)
                     }
                 }, selected: item == .general)
+                row(SidebarCheckRow(), selected: item == .touchscreenCheck)
                 Spacer()
             }
             .padding(.top, 40)
@@ -630,7 +634,7 @@ private struct SettingsRenderFrame: View {
             .frame(width: 210)
             .background(Color.primary.opacity(0.06))
             Divider()
-            SettingsDetail(snapshot: snapshot, item: item, perform: { _ in })
+            SettingsDetail(snapshot: snapshot, item: item, perform: { _ in }, notListed: notListed)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .windowBackgroundColor))

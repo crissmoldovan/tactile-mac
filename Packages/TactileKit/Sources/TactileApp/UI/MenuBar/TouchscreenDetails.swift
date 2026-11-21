@@ -1,7 +1,8 @@
 // A touchscreen's details, beside the menu-bar panel while its row is chosen: its name and a line
 // that sums it up; On, One finger and Show touches; Gesture Tester…; Calibrate Corners… and Test,
-// or Set Up Touchscreens… for one that isn't set up; Settings for <name>…. For one Tactile can't
-// use, why, and its pane; for one that isn't connected, its pane alone. What each shows, what
+// or Set Up Touchscreens… for one that isn't set up; Check This Touchscreen…; Settings for <name>….
+// For one Tactile can't use, why, Check This Touchscreen… and its pane; for one that isn't
+// connected, its pane alone. What each shows, what
 // enables it and what it sends is `MenuTouchscreenDetails`, the pane's own rules.
 
 import AppKit
@@ -147,7 +148,7 @@ struct TouchscreenDetailsView: View {
             if let support = details.support?.whileFinishing(SupportChecksFinishing.shared.isFinishing(details.id)),
                let target = details.supportTarget {
                 PanelSeparator()
-                PanelRowButton(title: Wording.helpMeSupport, isEnabled: support == .available) {
+                PanelRowButton(title: Wording.checkThisTouchscreen, isEnabled: support == .available) {
                     actions.closeMenu()
                     SupportCheckWindow.open(target, perform: perform)
                 }
@@ -244,7 +245,7 @@ struct TouchscreenDetailsMenu: View {
         if let support = details.support?.whileFinishing(SupportChecksFinishing.shared.isFinishing(details.id)),
            let target = details.supportTarget {
             Divider()
-            Button(Wording.helpMeSupport) { SupportCheckWindow.open(target, perform: perform) }
+            Button(Wording.checkThisTouchscreen) { SupportCheckWindow.open(target, perform: perform) }
                 .disabled(support != .available)
             if support != .available {
                 Text(Wording.supportUnavailable(support))

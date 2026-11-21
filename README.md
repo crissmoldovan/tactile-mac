@@ -53,7 +53,7 @@ Tactile keeps its settings in `~/Library/Application Support/Tactile/settings.js
 
 ## If your touchscreen doesn't work
 
-Choose **Help Me Support This Touchscreen…** in its pane in Settings, or in its details beside the menu. If Tactile doesn't list it at all, look under **Touchscreen Not Listed?** in General, which shows digitisers and touchscreens that only act as a mouse.
+Open **Touchscreen Check**, below General in Settings. It lists every connected touchscreen, and the touch devices Tactile doesn't list at all (digitisers, and touchscreens that only act as a mouse), each with **Check…**. A touchscreen's pane has **Check This Touchscreen…** under its On switch, and so do its details beside the menu. If touch doesn't work right while you set up a touchscreen, calibrate its corners or test it, the set-up screens offer the check too: click **Check This Touchscreen…**, or **Check…** beside the touchscreen when you set up several. The set-up ends first, and whatever was already set up stays.
 
 The check takes a minute. Tactile reads what the touchscreen says about itself, takes it as it always does, and asks you to touch it with one, two and five fingers. It ends with a verdict: works fully, works with one finger, or doesn't work.
 
