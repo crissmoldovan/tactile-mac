@@ -1,6 +1,6 @@
 // The touchscreen check's interface rules, kept pure so they are tested: where the check is offered,
-// which devices Touchscreen Not Listed? shows, each step's mark, and what the "what will be sent"
-// sheet offers at each stage.
+// which devices Touchscreen Not Listed? shows, each step's mark, what the "what will be sent"
+// sheet offers at each stage, and the sizes of the check's window, its sheet and the file viewer.
 
 import Foundation
 import TactileDevices
@@ -198,5 +198,63 @@ struct SupportSendSheetContent: Equatable {
         showsSaveReport = true
         self.message = message
         showsGitHub = gitHub
+    }
+}
+
+/// The check window's frame on the screen that shows it: `content` and the title bar, in the middle
+/// of the screen's visible frame, but never larger than that frame less `margin` all round. The
+/// window opens on the touchscreen's own display, which can be a short bar.
+///
+/// It is taller than the check itself needs, so that on an ordinary display the sheet shows every
+/// file of the report and the form without scrolling. It isn't resizable: on a short display it
+/// takes what there is, and the sheet fits that (`SupportSheetFit`).
+enum SupportCheckWindowFrame {
+    /// The window's content where there is room.
+    static let content = CGSize(width: 780, height: 700)
+    /// Kept clear between the window and the edges of the visible frame, when it has to shrink.
+    static let margin: CGFloat = 8
+
+    /// The frame on a screen whose visible frame is `visible`, for a window whose title bar is
+    /// `titleBar` points tall.
+    static func frame(in visible: CGRect, titleBar: CGFloat) -> CGRect {
+        let width = max(0, min(content.width, visible.width - 2 * margin)).rounded(.down)
+        let height = max(0, min(content.height + titleBar, visible.height - 2 * margin)).rounded(.down)
+        return CGRect(x: (visible.midX - width / 2).rounded(), y: (visible.midY - height / 2).rounded(),
+                      width: width, height: height)
+    }
+}
+
+/// How the "what will be sent" sheet, and the file viewer on it, fit what shows them. On macOS 26 a
+/// sheet is drawn inside its window and cut to it; on earlier macOS it hangs from the title bar, and
+/// runs past the bottom of a window shorter than it. So each is no larger than what shows it, less
+/// `margin` all round: the sheet within the check window's content, the viewer within the sheet.
+/// Inside, the title stays at the top and the buttons at the bottom; what lies between scrolls, and
+/// the file list gives up height first, down to about four rows.
+enum SupportSheetFit {
+    /// The sheet's size where there is room.
+    static let idealSheet = CGSize(width: 580, height: 720)
+    /// The file viewer's size where there is room. No sheet is that wide, so it is always as wide as
+    /// the sheet less the margins.
+    static let idealViewer = CGSize(width: 640, height: 520)
+    /// Kept clear between a sheet and the edges of what shows it.
+    static let margin: CGFloat = 12
+    /// The file list's height where there is room: every file of a report.
+    static let fileListHeight: CGFloat = 285
+    /// The least the file list shrinks to: four rows and a little of the next, so it shows there is more.
+    static let fileListMinimum: CGFloat = 136
+
+    /// The sheet's size in a window whose content is `room`.
+    static func sheet(in room: CGSize) -> CGSize {
+        fit(idealSheet, in: room)
+    }
+
+    /// The file viewer's size on a sheet of `sheet`.
+    static func viewer(on sheet: CGSize) -> CGSize {
+        fit(idealViewer, in: sheet)
+    }
+
+    private static func fit(_ ideal: CGSize, in room: CGSize) -> CGSize {
+        CGSize(width: max(0, min(ideal.width, room.width - 2 * margin)).rounded(.down),
+               height: max(0, min(ideal.height, room.height - 2 * margin)).rounded(.down))
     }
 }

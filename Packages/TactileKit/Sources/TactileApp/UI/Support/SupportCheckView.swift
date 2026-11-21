@@ -11,28 +11,33 @@ struct SupportCheckView: View {
 
     var body: some View {
         let _ = session.revision
-        VStack(alignment: .leading, spacing: 18) {
-            header
-            if let check = session.check {
-                HStack(alignment: .top, spacing: 24) {
-                    SupportStepList(check: check, revision: session.revision)
-                        .frame(width: 220)
-                    Divider()
-                    stepContent(check)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // As large as the window's content, whatever size the window took on its display
+        // (`SupportCheckWindowFrame`); the sheet is fitted to it.
+        GeometryReader { window in
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                    .supportPart(.title)
+                if let check = session.check {
+                    HStack(alignment: .top, spacing: 24) {
+                        SupportStepList(check: check, revision: session.revision)
+                            .frame(width: 220)
+                        Divider()
+                        stepContent(check)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                } else {
+                    Label(Wording.supportCantFind, systemImage: "exclamationmark.triangle.fill")
+                        .symbolRenderingMode(.multicolor)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
                 }
-            } else {
-                Label(Wording.supportCantFind, systemImage: "exclamationmark.triangle.fill")
-                    .symbolRenderingMode(.multicolor)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer()
             }
-        }
-        .padding(24)
-        .frame(width: SupportCheckWindow.size.width, height: SupportCheckWindow.size.height, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(isPresented: $session.isShowingSheet) {
-            SupportSendSheet(session: session)
+            .padding(24)
+            .frame(width: window.size.width, height: window.size.height, alignment: .topLeading)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .sheet(isPresented: $session.isShowingSheet) {
+                SupportSendSheet(session: session, room: window.size)
+            }
         }
     }
 
@@ -86,6 +91,7 @@ struct SupportCheckView: View {
                         .controlSize(.large)
                         .disabled(availability != .available)
                 }
+                .supportPart(.buttons)
             }
         case .taking:
             VStack(spacing: 12) {
@@ -199,6 +205,7 @@ struct SupportTouchArea: View {
                 Spacer()
                 Button(Wording.skip) { session.skip() }
             }
+            .supportPart(.buttons)
         }
     }
 }
@@ -240,6 +247,7 @@ struct SupportVerdictView: View {
                     .keyboardShortcut(.defaultAction)
             }
             .controlSize(.large)
+            .supportPart(.buttons)
         }
     }
 
@@ -274,6 +282,7 @@ struct SupportVerdictView: View {
                 }
             }
             .controlSize(.large)
+            .supportPart(.buttons)
         }
     }
 

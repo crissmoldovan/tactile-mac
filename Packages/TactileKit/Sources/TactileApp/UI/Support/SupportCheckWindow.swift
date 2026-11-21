@@ -1,5 +1,6 @@
 // The touchscreen check's window: an ordinary titled window, like the gesture tester's, on the
-// touchscreen's own display when Tactile knows it (else the main one), brought to the front and made
+// touchscreen's own display when Tactile knows it (else the main one), never larger than what that
+// display shows (`SupportCheckWindowFrame`: it can be a short bar), brought to the front and made
 // key by the steps Settings uses (`ActivationStep`), so its email field takes typing. One check at a
 // time: opening another closes this one first. Closing it (its close button, Esc, quitting, the Mac
 // going to sleep) stops the check, lets the device go, and Tactile takes its touchscreen back.
@@ -12,8 +13,6 @@ import TactileScreens
 @MainActor
 final class SupportCheckWindow: NSObject, NSWindowDelegate {
     static let shared = SupportCheckWindow()
-
-    static let size = CGSize(width: 780, height: 540)
 
     private var window: GestureTesterNSWindow?
     private var session: SupportCheckSession?
@@ -63,9 +62,11 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
     private func open(_ session: SupportCheckSession, display: UInt32?) {
         closeByItself(reason: "another check was asked for")
         let screen = display.flatMap { id in NSScreen.screens.first { $0.displayID == id } } ?? NSScreen.main ?? NSScreen.screens.first
-        let visible = screen?.visibleFrame ?? CGRect(origin: .zero, size: Self.size)
-        let frame = CGRect(x: (visible.midX - Self.size.width / 2).rounded(), y: (visible.midY - Self.size.height / 2).rounded(),
-                           width: Self.size.width, height: Self.size.height)
+        let titleBar = Self.titleBarHeight(GestureTesterNSWindow.style)
+        let visible = screen?.visibleFrame
+            ?? CGRect(origin: .zero, size: CGSize(width: SupportCheckWindowFrame.content.width,
+                                                  height: SupportCheckWindowFrame.content.height + titleBar + 2 * SupportCheckWindowFrame.margin))
+        let frame = SupportCheckWindowFrame.frame(in: visible, titleBar: titleBar)
         let window = GestureTesterNSWindow(contentRect: frame, styleMask: GestureTesterNSWindow.style, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.isRestorable = false
@@ -80,7 +81,18 @@ final class SupportCheckWindow: NSObject, NSWindowDelegate {
         self.session = session
         session.close = { [weak window] in window?.performClose(nil) }
         RegularAppHold.opened(.supportCheck)
+        InterfaceLog.log.info(
+            """
+            touchscreen check window: \(Int(frame.width), privacy: .public) × \(Int(frame.height), privacy: .public) \
+            in a visible frame of \(Int(visible.width), privacy: .public) × \(Int(visible.height), privacy: .public)
+            """)
         bringForward(window)
+    }
+
+    /// The height of a title bar of a window of `style`, on this macOS.
+    static func titleBarHeight(_ style: NSWindow.StyleMask) -> CGFloat {
+        let content = CGRect(x: 0, y: 0, width: 100, height: 100)
+        return NSWindow.frameRect(forContentRect: content, styleMask: style).height - content.height
     }
 
     /// In front, with focus: the steps of `ActivationStep`, as Settings and the gesture tester take them.
